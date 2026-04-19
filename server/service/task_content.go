@@ -45,6 +45,11 @@ type AppendTaskContentUpdateResult struct {
 	Duplicate bool
 }
 
+type SavePlainDocumentContentInput struct {
+	ContentMD       string
+	ExpectedVersion *int
+}
+
 func (s *TaskService) OpenTaskContentSession(ctx context.Context, lg *zap.Logger, uid int, taskID int) (*TaskContentSession, error) {
 	if taskID <= 0 {
 		return nil, apperrors.NewParamError("invalid task id")
@@ -58,9 +63,15 @@ func (s *TaskService) OpenTaskContentSession(ctx context.Context, lg *zap.Logger
 		lg.Error("task.content.get_task_failed", zap.Int("uid", uid), zap.Int("task_id", taskID), zap.Error(err))
 		return nil, apperrors.NewInternalError("failed to query task")
 	}
+	if task.DocType == models.DocTypeDiary {
+		return nil, apperrors.NewForbiddenError("diary content uses the plain Markdown save API")
+	}
 
 	role := models.RoleOwner
 	if task.UserID != uid {
+		if task.CollaborationMode == models.CollaborationModePrivate {
+			return nil, apperrors.NewForbiddenError("no permission to access private document")
+		}
 		role, err = s.taskMemberRepo.GetMemberRole(ctx, taskID, uid)
 		if err != nil {
 			lg.Error("task.content.get_role_failed", zap.Int("uid", uid), zap.Int("task_id", taskID), zap.Error(err))
@@ -154,6 +165,39 @@ func (s *TaskService) AppendTaskContentUpdate(ctx context.Context, lg *zap.Logge
 	}
 
 	return &AppendTaskContentUpdateResult{Update: created}, nil
+}
+
+func (s *TaskService) SavePlainDocumentContent(ctx context.Context, lg *zap.Logger, uid, taskID int, in SavePlainDocumentContentInput) (*models.Task, error, int64) {
+	if taskID <= 0 {
+		return nil, apperrors.NewParamError("invalid task id"), 0
+	}
+	if in.ExpectedVersion == nil || *in.ExpectedVersion <= 0 {
+		return nil, apperrors.NewParamError("expected_version is required"), 0
+	}
+	if int64(len(in.ContentMD)) > DocumentImportMaxMarkdownSize {
+		return nil, apperrors.NewParamError(fmt.Sprintf("content_md must be <= %d bytes", DocumentImportMaxMarkdownSize)), 0
+	}
+
+	task, err := s.repo.GetByID(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperrors.NewNotFoundError("document not found"), 0
+		}
+		lg.Error("document.content.get_task_failed", zap.Int("uid", uid), zap.Int("task_id", taskID), zap.Error(err))
+		return nil, apperrors.NewInternalError("failed to query document"), 0
+	}
+	if task.DocType != models.DocTypeDiary {
+		return nil, apperrors.NewForbiddenError("plain Markdown content save is only available for diary documents"), 0
+	}
+	if task.UserID != uid {
+		return nil, apperrors.NewForbiddenError("only the diary owner can save content"), 0
+	}
+
+	contentMD := in.ContentMD
+	return s.Update(ctx, lg, uid, task.ProjectID, task.ID, UpdateTaskInput{
+		ContentMD:       &contentMD,
+		ExpectedVersion: in.ExpectedVersion,
+	})
 }
 
 func (s *TaskService) createTaskContentUpdate(ctx context.Context, update *models.TaskContentUpdate) (*models.TaskContentUpdate, error) {

@@ -23,6 +23,7 @@ import (
 type UserService struct {
 	repo         repo.UserRepository
 	userCache    cache.UserCache
+	cacheClient  cache.Cache
 	bus          async.IEventBus
 	sf           singleflight.Group
 	hashPassword func(password string) (string, error)
@@ -32,6 +33,7 @@ type UserService struct {
 type UserServiceDeps struct {
 	Repo         repo.UserRepository
 	UserCache    cache.UserCache
+	CacheClient  cache.Cache
 	Bus          async.IEventBus
 	HashPassword func(password string) (string, error)
 	PutAvatar    func(ctx context.Context, file *multipart.FileHeader) (string, string, error)
@@ -51,6 +53,7 @@ func NewUserService(deps UserServiceDeps) *UserService {
 	return &UserService{
 		repo:         deps.Repo,
 		userCache:    deps.UserCache,
+		cacheClient:  deps.CacheClient,
 		bus:          deps.Bus,
 		hashPassword: hashPassword,
 		putAvatar:    putAvatar,
@@ -118,33 +121,38 @@ func (s *UserService) GetProfile(ctx context.Context, lg *zap.Logger, uid int) (
 	}
 
 	key := fmt.Sprintf("user:profile:%d", uid)
-	val, err, _ := s.sf.Do(key, func() (interface{}, error) {
+	val, err := loadWithCacheProtection(ctx, lg, &s.sf, s.cacheClient, key, func(loadCtx context.Context) (interface{}, error) {
 		// 查询数据库
-		dbUser, err := s.repo.GetByID(ctx, uid)
+		dbUser, err := s.repo.GetByID(loadCtx, uid)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				// 防穿透：写入空值
-				go func() {
-					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-					defer cancel()
-					_ = s.userCache.SetProfile(ctx, uid, nil)
-				}()
+				cacheCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				_ = s.userCache.SetProfile(cacheCtx, uid, nil)
 				return nil, apperrors.NewNotFoundError("用户不存在")
 			}
 			lg.Error("get_profile.db_failed", zap.Error(err))
 			return nil, apperrors.NewInternalError("系统错误")
 		}
 
-		// 3. 回写缓存 (异步执行)
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			if err := s.userCache.SetProfile(ctx, uid, dbUser); err != nil {
-				lg.Warn("get_profile.cache_set_failed", zap.Error(err))
-			}
-		}()
+		// 3. 回写缓存，确保等待中的跨实例请求能读到结果。
+		cacheCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := s.userCache.SetProfile(cacheCtx, uid, dbUser); err != nil {
+			lg.Warn("get_profile.cache_set_failed", zap.Error(err))
+		}
 
 		return dbUser, nil
+	}, func(readCtx context.Context) (interface{}, bool, error) {
+		user, err := s.userCache.GetProfile(readCtx, uid)
+		if err == nil && user != nil {
+			return user, true, nil
+		}
+		if errors.Is(err, cache.ErrCacheNotFound) {
+			return nil, false, apperrors.NewNotFoundError("用户不存在")
+		}
+		return nil, false, nil
 	})
 
 	if err != nil {

@@ -1,4 +1,4 @@
-# 项目接力说明
+﻿# 项目接力说明
 
 ## 项目概览
 
@@ -40,10 +40,14 @@
 - 项目级任务事件 WebSocket room 已落地：`GET /api/v1/projects/:id/ws` 支持 JWT 自鉴权、项目权限校验、`PROJECT_INIT` 补偿和任务事件实时广播
 - 项目级 presence 已落地：项目 WebSocket 会推送 `PRESENCE_SNAPSHOT`，前端 `ProjectDetailPage` 会显示在线人数
 - 项目级 metadata 协同锁已落地：项目 WebSocket 支持 `LOCK_REQUEST` / `LOCK_RELEASE`，广播 `TASK_LOCKED` / `TASK_UNLOCKED` / `LOCK_ERROR`；前端项目详情页会展示锁状态，任务详情编辑元数据时会申请并释放 `metadata` 锁
-- 限流是单机版，位于 `server/middlewares/ratelimit.go`
-- `singleflight` 也是单机版，主要分布在 `server/service/*.go`
+- 限流已改为 Redis 分布式 token bucket，位于 `server/middlewares/ratelimit.go`，Redis 异常时降级到本机 limiter
+- 主要缓存击穿路径已接入 `loadWithCacheProtection`：本机 `singleflight` 合并进程内请求，Redis 分布式锁跨实例保护 DB 回源，未拿到锁的请求会短暂等待缓存回填
 - Kafka 目前承担的是可靠异步副作用，不是实时广播链路
 - 当前产品主线已经改为协同文档工作台：普通文档和会议纪要可协作，日记类似 Obsidian Daily Notes 且默认非协同，待办只是轻量辅助模块
+- `tasks` 已新增 `doc_type` 和 `collaboration_mode`，当前用于区分普通文档/后续日记会议类型，以及协作文档/私人文档入口
+- Markdown 本地导入已落地为 Redis 会话 + COS 分片对象 + 图片资源上传：完成导入时会组装 Markdown、改写本地图片引用，并复用 `TaskService.Create` 创建文档
+- Obsidian Daily Notes 入口已落地：`POST /api/v1/diary/today` 会幂等创建/打开“日记”空间下当天 `YYYY-MM-DD.md`，文档标记为 `doc_type=diary`、`collaboration_mode=private`
+- 日记正文已改为 owner-only plain Markdown 保存接口：`PATCH /api/v1/documents/:id/content`；`doc_type=diary` 不再接入任务正文 Yjs WebSocket / update log
 - 前端项目详情页已具备事件驱动 patch；`MyTasksPage`、`Next7DaysPage`、`CalendarPage` 等待办视图已复用本地 patch helper 处理自身写操作，后续应收敛到 Todos 次级模块
 
 ## 当前主线规划
@@ -116,6 +120,24 @@
   - Redis 分布式锁 + Watchdog 自动续期
   - MySQL 版本号 CAS 防止静默覆盖
 - 当前新增接口：`GET /api/v1/projects/:id/sync`
+- 当前新增 Markdown 导入接口：
+  - `POST /api/v1/documents/imports`
+  - `PUT /api/v1/documents/imports/:upload_id/parts/:part_no`
+  - `POST /api/v1/documents/imports/:upload_id/assets`
+  - `POST /api/v1/documents/imports/:upload_id/complete`
+  - `DELETE /api/v1/documents/imports/:upload_id`
+- 当前新增日记接口：`POST /api/v1/diary/today`
+  - 查找或创建当前用户的“日记”空间
+  - 查找或创建当天 `YYYY-MM-DD.md`
+  - 返回 `{ project, task }`，前端会跳转到对应空间并通过 `?task=<id>` 自动打开详情
+- 当前新增日记正文保存接口：`PATCH /api/v1/documents/:id/content`
+  - 仅允许 diary owner 保存 `content_md`
+  - 需要 `expected_version` 做 CAS
+  - 不写入 `task_content_updates`，不走 Yjs 正文协同通道
+- 当前新增会议接口：`POST /api/v1/meetings`
+  - 可选传 `project_id` / `title`，默认创建到“会议”空间
+  - 文档类型固定为 `doc_type=meeting`，协作模式固定为 `collaboration_mode=collaborative`
+  - 默认注入会议模板：时间、参会人、议题、结论、行动项
 - 当前新增项目事件 WebSocket 接口：`GET /api/v1/projects/:id/ws`
   - 支持 `Authorization: Bearer <token>` 或 `?token=<jwt>`
   - 查询参数支持 `cursor` 或 `last_event_id`
@@ -133,4 +155,8 @@
 - `web/src/pages/MyTasksPage.jsx`、`web/src/pages/Next7DaysPage.jsx`、`web/src/pages/CalendarPage.jsx` 已在 toggle/delete/detail metadata save 成功后本地 patch；失败或成员变更等缺少 task snapshot 的路径仍可触发 reload 兜底
 - `web/src/pages/ProjectDetailPage.jsx` 已展示项目在线人数；presence 目前是快照感知，不包含光标、选区或正在编辑字段
 - `web/src/pages/ProjectDetailPage.jsx` 已消费项目级锁事件；`web/src/components/TaskDetailPanel.jsx` 会在编辑标题、优先级、截止时间等元数据前申请 `metadata` 锁，保存、取消、关闭或切换任务时释放锁；正文 textarea 仍走 Yjs 协同，不受 metadata 锁阻塞
-- Swagger 产物还未随本轮接口变化重生成，后续如果要交付接口文档，需要补 `docs/swagger.yaml`、`docs/swagger.json`、`docs/docs.go`
+- `web/src/pages/ProjectDetailPage.jsx` 已新增 Notion 风格协作文档块和私人文档块，两个块都支持新建文档、上传 `.md/.markdown` 并附加图片资源
+- `web/src/layouts/AppLayout.jsx` 已接入“日记”主导航入口，调用 `POST /api/v1/diary/today` 后刷新空间列表并跳转到日记文档
+- `web/src/layouts/AppLayout.jsx` 已接入“会议”主导航入口，调用 `POST /api/v1/meetings` 后创建会议纪要并自动打开
+- `web/src/pages/ProjectDetailPage.jsx` 支持 `?task=<id>` 自动打开指定文档详情
+- Swagger 产物已随本轮接口变化重生成：`docs/swagger.yaml`、`docs/swagger.json`、`docs/docs.go`

@@ -252,6 +252,20 @@
     font-size: 13px;
 }
 
+.yq-private-doc-note {
+    border: 1px solid rgba(183, 138, 79, 0.20);
+    border-radius: 16px;
+    background: rgba(183, 138, 79, 0.08);
+    padding: 14px;
+}
+
+.yq-private-doc-note p {
+    margin: 6px 0 0;
+    color: var(--color-text-secondary);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
 .yq-markdown-body p {
     margin-bottom: 10px;
 }

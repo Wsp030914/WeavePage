@@ -28,6 +28,10 @@ func (s *projectRepoStub) GetByIDAndUserID(ctx context.Context, id, userID int) 
 	panic("unexpected call to GetByIDAndUserID")
 }
 
+func (s *projectRepoStub) GetByUserName(ctx context.Context, userID int, name string) (*models.Project, error) {
+	panic("unexpected call to GetByUserName")
+}
+
 func (s *projectRepoStub) GetByIDsAndUserID(ctx context.Context, ids []int, userID int) ([]models.Project, error) {
 	if s.getByIDsAndUserIDFn != nil {
 		return s.getByIDsAndUserIDFn(ctx, ids, userID)

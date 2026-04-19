@@ -29,6 +29,32 @@ const (
 	listCacheRebuildQueryLimit = 20 * time.Second
 )
 
+func normalizeDocType(value string) string {
+	switch strings.TrimSpace(value) {
+	case "", models.DocTypeDocument:
+		return models.DocTypeDocument
+	case models.DocTypeMeeting:
+		return models.DocTypeMeeting
+	case models.DocTypeDiary:
+		return models.DocTypeDiary
+	case models.DocTypeTodo:
+		return models.DocTypeTodo
+	default:
+		return ""
+	}
+}
+
+func normalizeCollaborationMode(value string) string {
+	switch strings.TrimSpace(value) {
+	case "", models.CollaborationModeCollaborative:
+		return models.CollaborationModeCollaborative
+	case models.CollaborationModePrivate:
+		return models.CollaborationModePrivate
+	default:
+		return ""
+	}
+}
+
 type TaskService struct {
 	repo                   repo.TaskRepository
 	eventRepo              repo.TaskEventRepository
@@ -86,13 +112,15 @@ func NewTaskService(deps TaskServiceDeps) *TaskService {
 }
 
 type CreateTaskInput struct {
-	Title     string
-	ProjectID int
-	ContentMD *string
-	Priority  *int
-	Status    *string
-	StartAt   *time.Time
-	DueAt     *time.Time
+	Title             string
+	ProjectID         int
+	ContentMD         *string
+	DocType           string
+	CollaborationMode string
+	Priority          *int
+	Status            *string
+	StartAt           *time.Time
+	DueAt             *time.Time
 }
 
 func (s *TaskService) Create(ctx context.Context, lg *zap.Logger, uid int, in CreateTaskInput) (*models.Task, error) {
@@ -109,6 +137,16 @@ func (s *TaskService) Create(ctx context.Context, lg *zap.Logger, uid int, in Cr
 
 	if in.StartAt != nil && in.DueAt != nil && in.DueAt.Before(*in.StartAt) {
 		return nil, apperrors.NewParamError("截止时间必须晚于开始时间")
+	}
+
+	docType := normalizeDocType(in.DocType)
+	if docType == "" {
+		return nil, apperrors.NewParamError("无效的文档类型")
+	}
+
+	collaborationMode := normalizeCollaborationMode(in.CollaborationMode)
+	if collaborationMode == "" {
+		return nil, apperrors.NewParamError("无效的协作模式")
 	}
 
 	project, err := s.projectRepo.GetByIDAndUserID(ctx, in.ProjectID, uid)
@@ -154,14 +192,16 @@ func (s *TaskService) Create(ctx context.Context, lg *zap.Logger, uid int, in Cr
 	}
 
 	task := &models.Task{
-		UserID:    uid,
-		ProjectID: in.ProjectID,
-		Title:     in.Title,
-		ContentMD: contentMD,
-		Status:    status,
-		Priority:  priority,
-		DueAt:     in.DueAt,
-		SortOrder: time.Now().UnixNano(),
+		UserID:            uid,
+		ProjectID:         in.ProjectID,
+		Title:             in.Title,
+		ContentMD:         contentMD,
+		DocType:           docType,
+		CollaborationMode: collaborationMode,
+		Status:            status,
+		Priority:          priority,
+		DueAt:             in.DueAt,
+		SortOrder:         time.Now().UnixNano(),
 	}
 
 	var created *models.Task
@@ -236,6 +276,9 @@ func (s *TaskService) Update(ctx context.Context, lg *zap.Logger, uid, pid int, 
 		return nil, apperrors.NewParamError("expected_version is required"), 0
 	}
 	if task.UserID != uid {
+		if task.CollaborationMode == models.CollaborationModePrivate {
+			return nil, apperrors.NewForbiddenError("no permission to update private document"), 0
+		}
 		role, err := s.taskMemberRepo.GetMemberRole(ctx, id, uid)
 		if err != nil {
 			lg.Error("task.update.get_role_failed", zap.Int("uid", uid), zap.Int("task_id", id), zap.Error(err))
@@ -265,6 +308,9 @@ func (s *TaskService) Update(ctx context.Context, lg *zap.Logger, uid, pid int, 
 	}()
 
 	if task.UserID != uid {
+		if task.CollaborationMode == models.CollaborationModePrivate {
+			return nil, apperrors.NewForbiddenError("无权修改私人文档"), 0
+		}
 		role, err := s.taskMemberRepo.GetMemberRole(ctx, id, uid)
 		if err != nil {
 			lg.Error("task.update.get_role_failed", zap.Int("uid", uid), zap.Int("task_id", id), zap.Error(err))
@@ -508,42 +554,61 @@ func (s *TaskService) Delete(ctx context.Context, lg *zap.Logger, uid int, id in
 }
 
 func (s *TaskService) GetDetail(ctx context.Context, lg *zap.Logger, uid, id int) (*models.Task, error) {
-
-	role, err := s.taskMemberRepo.GetMemberRole(ctx, id, uid)
-	if err != nil {
-		lg.Error("task.check_permission.failed", zap.Error(err))
-		return nil, apperrors.NewInternalError("系统错误")
-	}
-	if role != models.RoleEditor && role != models.RoleOwner && role != models.RoleViewer {
-		return nil, apperrors.NewForbiddenError("无权访问该任务")
-	}
-
 	cached, err := s.taskCache.GetDetail(ctx, uid, id)
 	if err == nil && cached != nil {
 		return cached, nil
 	}
 
-	task, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, apperrors.NewNotFoundError("任务不存在")
+	key := fmt.Sprintf("task:detail:%d:%d", uid, id)
+	val, err := loadWithCacheProtection(ctx, lg, &s.sf, s.cacheClient, key, func(loadCtx context.Context) (interface{}, error) {
+		task, err := s.repo.GetByID(loadCtx, id)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, apperrors.NewNotFoundError("任务不存在")
+			}
+			lg.Error("task.get_detail.failed", zap.Error(err))
+			return nil, apperrors.NewInternalError("系统错误")
 		}
-		lg.Error("task.get_detail.failed", zap.Error(err))
-		return nil, apperrors.NewInternalError("系统错误")
-	}
 
-	members, err := s.taskMemberRepo.GetMembersByTaskID(ctx, id)
+		if task.UserID != uid {
+			if task.CollaborationMode == models.CollaborationModePrivate {
+				return nil, apperrors.NewForbiddenError("无权访问私人文档")
+			}
+			role, roleErr := s.taskMemberRepo.GetMemberRole(loadCtx, id, uid)
+			if roleErr != nil {
+				lg.Error("task.check_permission.failed", zap.Error(roleErr))
+				return nil, apperrors.NewInternalError("系统错误")
+			}
+			if role != models.RoleEditor && role != models.RoleViewer {
+				return nil, apperrors.NewForbiddenError("无权访问该任务")
+			}
+		}
+
+		members, err := s.taskMemberRepo.GetMembersByTaskID(loadCtx, id)
+		if err != nil {
+			lg.Error("task.get_detail.get_members_failed", zap.Error(err))
+		} else {
+			task.Members = members
+		}
+
+		cacheCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := s.taskCache.SetDetail(cacheCtx, uid, id, task); err != nil {
+			lg.Warn("task.get_detail.cache_failed", zap.Error(err))
+		}
+
+		return task, nil
+	}, func(readCtx context.Context) (interface{}, bool, error) {
+		task, err := s.taskCache.GetDetail(readCtx, uid, id)
+		if err == nil && task != nil {
+			return task, true, nil
+		}
+		return nil, false, nil
+	})
 	if err != nil {
-		lg.Error("task.get_detail.get_members_failed", zap.Error(err))
-	} else {
-		task.Members = members
+		return nil, err
 	}
-
-	if err := s.taskCache.SetDetail(ctx, uid, id, task); err != nil {
-		lg.Warn("task.get_detail.cache_failed", zap.Error(err))
-	}
-
-	return task, nil
+	return val.(*models.Task), nil
 }
 
 type TaskListInput struct {
@@ -680,7 +745,7 @@ func (s *TaskService) List(ctx context.Context, lg *zap.Logger, uid int, in Task
 			}
 			sfKey := fmt.Sprintf("task:list:hydrate:%d:%d:%s:%d:%d", in.Pid, uid, statusKey, page, size)
 
-			shared, sharedErr, _ := s.sf.Do(sfKey, func() (interface{}, error) {
+			shared, sharedErr := loadWithCacheProtection(ctx, lg, &s.sf, s.cacheClient, sfKey, func(loadCtx context.Context) (interface{}, error) {
 				dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 
@@ -696,6 +761,20 @@ func (s *TaskService) List(ctx context.Context, lg *zap.Logger, uid int, in Task
 					}
 				}
 				return dbTasks, nil
+			}, func(readCtx context.Context) (interface{}, bool, error) {
+				cacheMap, missing, err := s.taskCache.MGetDetail(readCtx, uid, ids)
+				if err != nil || len(missing) > 0 {
+					return nil, false, nil
+				}
+				cached := make([]models.Task, 0, len(ids))
+				for _, id := range ids {
+					task, ok := cacheMap[id]
+					if !ok || task == nil {
+						return nil, false, nil
+					}
+					cached = append(cached, *task)
+				}
+				return cached, true, nil
 			})
 			if sharedErr != nil {
 				lg.Error("task.list.get_by_ids_failed", zap.Error(sharedErr))
@@ -758,7 +837,7 @@ DB_FALLBACK:
 	}
 	sfKey := fmt.Sprintf("task:list:fallback:%d:%s:%d:%d", in.Pid, statusKey, page, size)
 
-	shared, sharedErr, _ := s.sf.Do(sfKey, func() (interface{}, error) {
+	shared, sharedErr := loadWithCacheProtection(ctx, lg, &s.sf, s.cacheClient, sfKey, func(loadCtx context.Context) (interface{}, error) {
 		// Decouple from caller cancellation so one canceled request does not
 		// abort the shared fallback query for all concurrent callers.
 		dbCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -769,6 +848,31 @@ DB_FALLBACK:
 			return nil, dbErr
 		}
 		return &TaskListResult{Tasks: dbTasks, Total: dbTotal}, nil
+	}, func(readCtx context.Context) (interface{}, bool, error) {
+		ids, err := s.taskCache.GetTaskIDs(readCtx, in.Pid, in.Status, page, size)
+		if err != nil {
+			return nil, false, nil
+		}
+		total, err := s.taskCache.CountTaskIDs(readCtx, in.Pid, in.Status)
+		if err != nil {
+			return nil, false, nil
+		}
+		if len(ids) == 0 {
+			return &TaskListResult{Tasks: []models.Task{}, Total: total}, true, nil
+		}
+		taskMap, missing, err := s.taskCache.MGetDetail(readCtx, uid, ids)
+		if err != nil || len(missing) > 0 {
+			return nil, false, nil
+		}
+		cached := make([]models.Task, 0, len(ids))
+		for _, id := range ids {
+			task, ok := taskMap[id]
+			if !ok || task == nil {
+				return nil, false, nil
+			}
+			cached = append(cached, *task)
+		}
+		return &TaskListResult{Tasks: cached, Total: total}, true, nil
 	})
 	if sharedErr != nil {
 		lg.Error("task.list.failed", zap.Error(sharedErr))
@@ -843,6 +947,9 @@ func (s *TaskService) AddMember(ctx context.Context, lg *zap.Logger, uid, taskID
 
 	if project.UserID != uid {
 		return apperrors.NewForbiddenError("只有项目拥有者可以添加任务成员")
+	}
+	if task.CollaborationMode == models.CollaborationModePrivate {
+		return apperrors.NewForbiddenError("私人文档不能添加协作者")
 	}
 
 	targetUser, err := s.userRepo.GetByEmail(ctx, targetEmail)

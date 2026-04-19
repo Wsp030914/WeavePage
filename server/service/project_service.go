@@ -152,16 +152,14 @@ func (s *ProjectService) GetByID(ctx context.Context, lg *zap.Logger, userID, pr
 	}
 
 	key := fmt.Sprintf("project:%d:%d", userID, projectID)
-	val, err, _ := s.sf.Do(key, func() (interface{}, error) {
-		project, err := s.repo.GetByIDAndUserID(ctx, projectID, userID)
+	val, err := loadWithCacheProtection(ctx, lg, &s.sf, s.cacheClient, key, func(loadCtx context.Context) (interface{}, error) {
+		project, err := s.repo.GetByIDAndUserID(loadCtx, projectID, userID)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				lg.Info("project.get.not_found")
-				go func() {
-					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-					defer cancel()
-					_ = s.projectCache.Set(ctx, userID, projectID, nil)
-				}()
+				cacheCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				_ = s.projectCache.Set(cacheCtx, userID, projectID, nil)
 				return nil, apperrors.NewNotFoundError("项目不存在")
 			}
 			lg.Error("project.get.failed", zap.Error(err))
@@ -170,21 +168,28 @@ func (s *ProjectService) GetByID(ctx context.Context, lg *zap.Logger, userID, pr
 
 		if project.UserID != userID {
 			lg.Info("project.get.forbidden")
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-				defer cancel()
-				_ = s.projectCache.Set(ctx, userID, projectID, nil)
-			}()
+			cacheCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_ = s.projectCache.Set(cacheCtx, userID, projectID, nil)
 			return nil, apperrors.NewNotFoundError("项目不存在")
 		}
 
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			s.projectCache.Set(ctx, userID, projectID, project)
-		}()
+		cacheCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := s.projectCache.Set(cacheCtx, userID, projectID, project); err != nil {
+			lg.Warn("project.get.cache_set_failed", zap.Error(err))
+		}
 
 		return project, nil
+	}, func(readCtx context.Context) (interface{}, bool, error) {
+		project, err := s.projectCache.Get(readCtx, userID, projectID)
+		if err == nil && project != nil {
+			return project, true, nil
+		}
+		if errors.Is(err, cache.ErrCacheNull) {
+			return nil, false, apperrors.NewNotFoundError("项目不存在")
+		}
+		return nil, false, nil
 	})
 
 	if err != nil {
@@ -221,29 +226,38 @@ func (s *ProjectService) List(ctx context.Context, lg *zap.Logger, userID int, i
 		ids, err := s.projectCache.GetProjectIDs(ctx, userID, page, size)
 		if err != nil {
 			if errors.Is(err, cache.ErrCacheMiss) {
-				allProjects, err := s.repo.GetAllIDs(ctx, userID)
+				key := fmt.Sprintf("project:list:ids:%d:%d:%d", userID, page, size)
+				shared, err := loadWithCacheProtection(ctx, lg, &s.sf, s.cacheClient, key, func(loadCtx context.Context) (interface{}, error) {
+					allProjects, err := s.repo.GetAllIDs(loadCtx, userID)
+					if err != nil {
+						return nil, err
+					}
+					if len(allProjects) == 0 {
+						return []int{}, nil
+					}
+					if err := s.projectCache.SetProjectIDs(loadCtx, userID, allProjects); err != nil {
+						return nil, err
+					}
+					return s.projectCache.GetProjectIDs(loadCtx, userID, page, size)
+				}, func(readCtx context.Context) (interface{}, bool, error) {
+					ids, err := s.projectCache.GetProjectIDs(readCtx, userID, page, size)
+					if err == nil {
+						return ids, true, nil
+					}
+					return nil, false, nil
+				})
 				if err != nil {
-					lg.Error("project.list.get_all_ids_failed", zap.Error(err))
+					lg.Error("project.list.rebuild_ids_failed", zap.Error(err))
 					repairCache = true
 					goto DB_FALLBACK
 				}
-
-				if len(allProjects) == 0 {
-					return &ProjectListResult{Projects: []models.Project{}, Total: 0}, nil
-				}
-
-				if err := s.projectCache.SetProjectIDs(ctx, userID, allProjects); err != nil {
-					lg.Error("project.list.set_zset_failed", zap.Error(err))
+				typedIDs, ok := shared.([]int)
+				if !ok {
+					lg.Error("project.list.rebuild_ids_invalid_result")
 					repairCache = true
 					goto DB_FALLBACK
 				}
-
-				ids, err = s.projectCache.GetProjectIDs(ctx, userID, page, size)
-				if err != nil {
-					lg.Error("project.list.get_ids_after_rebuild_failed", zap.Error(err))
-					repairCache = true
-					goto DB_FALLBACK
-				}
+				ids = typedIDs
 			} else {
 				lg.Error("project.list.zset_failed", zap.Error(err))
 				repairCache = true

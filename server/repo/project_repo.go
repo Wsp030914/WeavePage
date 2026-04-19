@@ -11,6 +11,7 @@ type ProjectRepository interface {
 	Create(ctx context.Context, project *models.Project) (*models.Project, error)
 	GetByID(ctx context.Context, id int) (*models.Project, error)
 	GetByIDAndUserID(ctx context.Context, id, userID int) (*models.Project, error)
+	GetByUserName(ctx context.Context, userID int, name string) (*models.Project, error)
 	GetByIDsAndUserID(ctx context.Context, ids []int, userID int) ([]models.Project, error)
 	List(ctx context.Context, userID int, page, size int) ([]models.Project, int64, error)
 	Search(ctx context.Context, userID int, name string, page, size int) ([]models.Project, int64, error)
@@ -41,6 +42,12 @@ func (r *projectRepo) GetByID(ctx context.Context, id int) (*models.Project, err
 func (r *projectRepo) GetByIDAndUserID(ctx context.Context, id, userID int) (*models.Project, error) {
 	var project models.Project
 	err := r.db.WithContext(ctx).Where("id = ? AND user_id = ?", id, userID).First(&project).Error
+	return &project, err
+}
+
+func (r *projectRepo) GetByUserName(ctx context.Context, userID int, name string) (*models.Project, error) {
+	var project models.Project
+	err := r.db.WithContext(ctx).Where("user_id = ? AND name = ?", userID, name).First(&project).Error
 	return &project, err
 }
 

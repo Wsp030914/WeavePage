@@ -21,7 +21,7 @@ const (
 	contentPongWait       = 60 * time.Second
 	contentPingPeriod     = (contentPongWait * 9) / 10
 	contentSendBufferSize = 32
-	contentMaxMessageSize = 2 << 20
+	contentMaxMessageSize = 32 << 20
 )
 
 type ContentHub struct {

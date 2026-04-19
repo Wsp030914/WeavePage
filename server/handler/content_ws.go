@@ -29,6 +29,23 @@ func NewContentWSHandler(taskSvc *service.TaskService, authSvc *service.AuthServ
 	}
 }
 
+// TaskContent
+// @Summary Task content collaboration WebSocket
+// @Description Upgrades to a task content WebSocket stream for CONTENT_INIT, CONTENT_SYNC, CONTENT_UPDATE, CONTENT_ACK, CONTENT_ERROR, PING, and PONG messages. Authenticate with Authorization: Bearer <token> or the token query parameter. Diary documents are rejected; save them with PATCH /api/v1/documents/{id}/content.
+// @Tags Realtime
+// @Accept json
+// @Produce json
+// @Param id path int true "Task ID"
+// @Param Authorization header string false "Bearer JWT"
+// @Param token query string false "JWT when a WebSocket client cannot send Authorization"
+// @Param last_update_id query int false "Last seen task_content_updates id"
+// @Success 101 {object} realtime.ContentServerMessage "Switching Protocols; subsequent frames use this message schema"
+// @Failure 400 {object} response.Resp "Invalid request parameters"
+// @Failure 401 {object} response.Resp "Missing or invalid token"
+// @Failure 403 {object} response.Resp "Permission denied"
+// @Failure 404 {object} response.Resp "Task not found"
+// @Failure 503 {object} response.Resp "WebSocket hub is not configured"
+// @Router /tasks/{id}/content/ws [get]
 func (h *ContentWSHandler) TaskContent(c *gin.Context) {
 	lg := utils.CtxLogger(c)
 	start := time.Now()

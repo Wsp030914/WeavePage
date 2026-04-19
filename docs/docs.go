@@ -15,7 +15,7 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/internal/due_callback": {
+        "/api/internal/scheduler/task-due": {
             "post": {
                 "description": "内部调度器回调接口，用于触发任务到期通知",
                 "consumes": [
@@ -55,6 +55,496 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "令牌无效",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            }
+        },
+        "/diary/today": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "查找或创建当前用户的“日记”空间，并打开当天 YYYY-MM-DD.md 私人文档。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Diary"
+                ],
+                "summary": "打开或创建今日日记",
+                "responses": {
+                    "200": {
+                        "description": "打开成功",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.DiaryTodayResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "权限不足",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "500": {
+                        "description": "系统错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            }
+        },
+        "/documents/imports": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Creates a resumable Markdown import session. Use collaboration_mode=collaborative for shared docs or private for private docs.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DocumentImport"
+                ],
+                "summary": "Create Markdown document import session",
+                "parameters": [
+                    {
+                        "description": "Import metadata",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.CreateDocumentImportReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Session created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.DocumentImportSessionResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request parameters",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "403": {
+                        "description": "Permission denied",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            }
+        },
+        "/documents/imports/{upload_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes temporary uploaded chunks and assets for an unfinished import session.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DocumentImport"
+                ],
+                "summary": "Abort Markdown document import",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Upload session id",
+                        "name": "upload_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Import aborted",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "403": {
+                        "description": "Permission denied",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "404": {
+                        "description": "Session not found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            }
+        },
+        "/documents/imports/{upload_id}/assets": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Uploads an image asset referenced by the Markdown file and records its original relative path for link rewriting.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DocumentImport"
+                ],
+                "summary": "Upload Markdown referenced image",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Upload session id",
+                        "name": "upload_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Original relative path in Markdown, such as images/a.png",
+                        "name": "original_path",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Image file",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Asset uploaded",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.DocumentImportAssetResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request parameters",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "403": {
+                        "description": "Permission denied",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "404": {
+                        "description": "Session not found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            }
+        },
+        "/documents/imports/{upload_id}/complete": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Assembles uploaded chunks, rewrites local image references to uploaded asset URLs, and creates a document.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DocumentImport"
+                ],
+                "summary": "Complete Markdown document import",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Upload session id",
+                        "name": "upload_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Optional completion data",
+                        "name": "req",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handler.CompleteDocumentImportReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Document imported",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.DocumentImportCompleteResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request parameters",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "403": {
+                        "description": "Permission denied",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "404": {
+                        "description": "Session not found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "409": {
+                        "description": "Upload incomplete or digest mismatch",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            }
+        },
+        "/documents/imports/{upload_id}/parts/{part_no}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Uploads one raw binary Markdown chunk for a resumable import session.",
+                "consumes": [
+                    "application/octet-stream"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DocumentImport"
+                ],
+                "summary": "Upload Markdown import chunk",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Upload session id",
+                        "name": "upload_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "1-based part number",
+                        "name": "part_no",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Raw chunk bytes",
+                        "name": "file",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Part uploaded",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.DocumentImportPartResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request parameters",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "403": {
+                        "description": "Permission denied",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "404": {
+                        "description": "Session not found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "409": {
+                        "description": "Session busy or incomplete",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            }
+        },
+        "/documents/{id}/content": {
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Saves plain Markdown content for diary documents. Only the owner can save, and this does not write the Yjs update log.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Document"
+                ],
+                "summary": "Save plain Markdown document content",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Document ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Content payload",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.SaveDocumentContentReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Saved",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/models.Task"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid parameters",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found",
                         "schema": {
                             "$ref": "#/definitions/response.Resp"
                         }
@@ -148,6 +638,68 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "未授权",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            }
+        },
+        "/meetings": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "新建 Notion 风格会议纪要，默认启用协作并写入会议模板。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Meeting"
+                ],
+                "summary": "新建会议纪要",
+                "parameters": [
+                    {
+                        "description": "可选：指定 project_id 或自定义标题",
+                        "name": "req",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handler.CreateMeetingReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "创建成功",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.MeetingCreateResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "权限不足",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "500": {
+                        "description": "系统错误",
                         "schema": {
                             "$ref": "#/definitions/response.Resp"
                         }
@@ -440,6 +992,85 @@ const docTemplate = `{
                 }
             }
         },
+        "/projects/{id}/sync": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns task event rows after a cursor for reconnect/backfill. The cursor is the task_events auto-increment id.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Realtime"
+                ],
+                "summary": "Sync project task events",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Project ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Last seen task event id",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size, max 200",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Sync events loaded",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.ProjectSyncResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request parameters",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "403": {
+                        "description": "Permission denied",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "404": {
+                        "description": "Project not found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{id}/tasks/{task_id}": {
             "patch": {
                 "security": [
@@ -608,6 +1239,92 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "移除成功",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{id}/ws": {
+            "get": {
+                "description": "Upgrades to a project WebSocket stream for PROJECT_INIT, PROJECT_SYNC, TASK_CREATED, TASK_UPDATED, TASK_DELETED, PRESENCE_SNAPSHOT, TASK_LOCKED, TASK_UNLOCKED, LOCK_ERROR, PING, and PONG messages. Authenticate with Authorization: Bearer \u003ctoken\u003e or the token query parameter.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Realtime"
+                ],
+                "summary": "Project realtime WebSocket",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Project ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bearer JWT",
+                        "name": "Authorization",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "JWT when a WebSocket client cannot send Authorization",
+                        "name": "token",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Last seen task event id",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Alias of cursor",
+                        "name": "last_event_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "101": {
+                        "description": "Switching Protocols; subsequent frames use this message schema",
+                        "schema": {
+                            "$ref": "#/definitions/realtime.ProjectServerMessage"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request parameters",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid token",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "403": {
+                        "description": "Permission denied",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "404": {
+                        "description": "Project not found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "503": {
+                        "description": "WebSocket hub is not configured",
                         "schema": {
                             "$ref": "#/definitions/response.Resp"
                         }
@@ -995,6 +1712,86 @@ const docTemplate = `{
                 }
             }
         },
+        "/tasks/{id}/content/ws": {
+            "get": {
+                "description": "Upgrades to a task content WebSocket stream for CONTENT_INIT, CONTENT_SYNC, CONTENT_UPDATE, CONTENT_ACK, CONTENT_ERROR, PING, and PONG messages. Authenticate with Authorization: Bearer \u003ctoken\u003e or the token query parameter. Diary documents are rejected; save them with PATCH /api/v1/documents/{id}/content.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Realtime"
+                ],
+                "summary": "Task content collaboration WebSocket",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Task ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bearer JWT",
+                        "name": "Authorization",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "JWT when a WebSocket client cannot send Authorization",
+                        "name": "token",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Last seen task_content_updates id",
+                        "name": "last_update_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "101": {
+                        "description": "Switching Protocols; subsequent frames use this message schema",
+                        "schema": {
+                            "$ref": "#/definitions/realtime.ContentServerMessage"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request parameters",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid token",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "403": {
+                        "description": "Permission denied",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "404": {
+                        "description": "Task not found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "503": {
+                        "description": "WebSocket hub is not configured",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            }
+        },
         "/users/me": {
             "get": {
                 "security": [
@@ -1144,6 +1941,59 @@ const docTemplate = `{
                 }
             }
         },
+        "handler.CompleteDocumentImportReq": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.CreateDocumentImportReq": {
+            "type": "object",
+            "required": [
+                "file_name",
+                "project_id",
+                "total_size"
+            ],
+            "properties": {
+                "chunk_size": {
+                    "type": "integer"
+                },
+                "collaboration_mode": {
+                    "type": "string"
+                },
+                "file_name": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "integer"
+                },
+                "sha256": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "total_parts": {
+                    "type": "integer"
+                },
+                "total_size": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handler.CreateMeetingReq": {
+            "type": "object",
+            "properties": {
+                "project_id": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
         "handler.CreateProjectReq": {
             "type": "object",
             "required": [
@@ -1167,7 +2017,13 @@ const docTemplate = `{
                 "title"
             ],
             "properties": {
+                "collaboration_mode": {
+                    "type": "string"
+                },
                 "content_md": {
+                    "type": "string"
+                },
+                "doc_type": {
                     "type": "string"
                 },
                 "due_at": {
@@ -1234,6 +2090,21 @@ const docTemplate = `{
                 }
             }
         },
+        "handler.SaveDocumentContentReq": {
+            "type": "object",
+            "required": [
+                "content_md",
+                "expected_version"
+            ],
+            "properties": {
+                "content_md": {
+                    "type": "string"
+                },
+                "expected_version": {
+                    "type": "integer"
+                }
+            }
+        },
         "handler.UpdateProjectReq": {
             "type": "object",
             "properties": {
@@ -1251,11 +2122,17 @@ const docTemplate = `{
         "handler.UpdateTaskReq": {
             "type": "object",
             "properties": {
+                "clear_due_at": {
+                    "type": "boolean"
+                },
                 "content_md": {
                     "type": "string"
                 },
                 "due_at": {
                     "type": "string"
+                },
+                "expected_version": {
+                    "type": "integer"
                 },
                 "priority": {
                     "type": "integer"
@@ -1303,10 +2180,16 @@ const docTemplate = `{
         "models.Task": {
             "type": "object",
             "properties": {
+                "collaboration_mode": {
+                    "type": "string"
+                },
                 "content_md": {
                     "type": "string"
                 },
                 "created_at": {
+                    "type": "string"
+                },
+                "doc_type": {
                     "type": "string"
                 },
                 "due_at": {
@@ -1314,6 +2197,12 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "integer"
+                },
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.TaskMemberInfo"
+                    }
                 },
                 "notified": {
                     "type": "boolean"
@@ -1335,6 +2224,58 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                },
+                "user_id": {
+                    "type": "integer"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.TaskEvent": {
+            "type": "object",
+            "properties": {
+                "actor_id": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "event_id": {
+                    "type": "string"
+                },
+                "event_type": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "payload": {
+                    "type": "object"
+                },
+                "project_id": {
+                    "type": "integer"
+                },
+                "task_id": {
+                    "type": "integer"
+                },
+                "task_version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.TaskMemberInfo": {
+            "type": "object",
+            "properties": {
+                "joined_at": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/models.UserInfo"
                 },
                 "user_id": {
                     "type": "integer"
@@ -1367,6 +2308,165 @@ const docTemplate = `{
                 }
             }
         },
+        "models.UserInfo": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "realtime.ContentServerMessage": {
+            "type": "object",
+            "properties": {
+                "actor_id": {
+                    "type": "integer"
+                },
+                "duplicate": {
+                    "type": "boolean"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "message_id": {
+                    "type": "string"
+                },
+                "next_cursor": {
+                    "type": "integer"
+                },
+                "server_node_id": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "integer"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "update": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "update_id": {
+                    "type": "integer"
+                },
+                "updates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/realtime.ContentUpdateItem"
+                    }
+                }
+            }
+        },
+        "realtime.ContentUpdateItem": {
+            "type": "object",
+            "properties": {
+                "actor_id": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "message_id": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "integer"
+                },
+                "update": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        "realtime.ProjectLock": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string"
+                },
+                "holder_user_id": {
+                    "type": "integer"
+                },
+                "holder_username": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "realtime.ProjectPresence": {
+            "type": "object",
+            "properties": {
+                "connections": {
+                    "type": "integer"
+                },
+                "user_id": {
+                    "type": "integer"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "realtime.ProjectServerMessage": {
+            "type": "object",
+            "properties": {
+                "cursor": {
+                    "type": "integer"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "event": {
+                    "$ref": "#/definitions/models.TaskEvent"
+                },
+                "event_id": {
+                    "type": "string"
+                },
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.TaskEvent"
+                    }
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "lock": {
+                    "$ref": "#/definitions/realtime.ProjectLock"
+                },
+                "next_cursor": {
+                    "type": "integer"
+                },
+                "presence": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/realtime.ProjectPresence"
+                    }
+                },
+                "project_id": {
+                    "type": "integer"
+                },
+                "server_node_id": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
         "response.PageResult": {
             "type": "object",
             "properties": {
@@ -1391,6 +2491,148 @@ const docTemplate = `{
                 "data": {},
                 "message": {
                     "type": "string"
+                }
+            }
+        },
+        "service.DiaryTodayResult": {
+            "type": "object",
+            "properties": {
+                "project": {
+                    "$ref": "#/definitions/models.Project"
+                },
+                "task": {
+                    "$ref": "#/definitions/models.Task"
+                }
+            }
+        },
+        "service.DocumentImportAssetResult": {
+            "type": "object",
+            "properties": {
+                "markdown": {
+                    "type": "string"
+                },
+                "original_path": {
+                    "type": "string"
+                },
+                "upload_id": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.DocumentImportCompleteResult": {
+            "type": "object",
+            "properties": {
+                "assets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.DocumentImportAssetResult"
+                    }
+                },
+                "stats": {
+                    "$ref": "#/definitions/service.DocumentImportCompletionStats"
+                },
+                "task": {
+                    "$ref": "#/definitions/models.Task"
+                }
+            }
+        },
+        "service.DocumentImportCompletionStats": {
+            "type": "object",
+            "properties": {
+                "rewritten_links": {
+                    "type": "integer"
+                },
+                "size_bytes": {
+                    "type": "integer"
+                }
+            }
+        },
+        "service.DocumentImportPartResult": {
+            "type": "object",
+            "properties": {
+                "part_no": {
+                    "type": "integer"
+                },
+                "received_parts": {
+                    "type": "integer"
+                },
+                "sha256": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "total_parts": {
+                    "type": "integer"
+                },
+                "upload_id": {
+                    "type": "string"
+                },
+                "uploaded_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.DocumentImportSessionResult": {
+            "type": "object",
+            "properties": {
+                "chunk_size": {
+                    "type": "integer"
+                },
+                "collaboration_mode": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "file_name": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "total_parts": {
+                    "type": "integer"
+                },
+                "total_size": {
+                    "type": "integer"
+                },
+                "upload_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.MeetingCreateResult": {
+            "type": "object",
+            "properties": {
+                "project": {
+                    "$ref": "#/definitions/models.Project"
+                },
+                "task": {
+                    "$ref": "#/definitions/models.Task"
+                }
+            }
+        },
+        "service.ProjectSyncResult": {
+            "type": "object",
+            "properties": {
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.TaskEvent"
+                    }
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "next_cursor": {
+                    "type": "integer"
                 }
             }
         },

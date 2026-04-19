@@ -42,15 +42,46 @@ function applyEditorChangesToYText(yText, changes) {
     });
 }
 
-export default function DocumentMarkdownEditor({ provider, value = '', onChange }) {
+export default function DocumentMarkdownEditor({
+    provider,
+    value = '',
+    onChange,
+    collaborative = true,
+}) {
     const hostRef = useRef(null);
     const viewRef = useRef(null);
     const applyingRemoteRef = useRef(false);
     const initialValueRef = useRef(value);
 
     useEffect(() => {
+        if (!hostRef.current) return undefined;
+
+        if (!collaborative) {
+            const view = new EditorView({
+                parent: hostRef.current,
+                doc: initialValueRef.current || '',
+                extensions: [
+                    basicSetup,
+                    markdown(),
+                    EditorView.lineWrapping,
+                    EditorView.updateListener.of((update) => {
+                        if (!update.docChanged) return;
+                        onChange?.(update.state.doc.toString());
+                    }),
+                ],
+            });
+            viewRef.current = view;
+
+            return () => {
+                view.destroy();
+                if (viewRef.current === view) {
+                    viewRef.current = null;
+                }
+            };
+        }
+
         const yText = provider?.getText?.();
-        if (!hostRef.current || !yText) return undefined;
+        if (!yText) return undefined;
 
         const view = new EditorView({
             parent: hostRef.current,
@@ -96,9 +127,9 @@ export default function DocumentMarkdownEditor({ provider, value = '', onChange 
                 viewRef.current = null;
             }
         };
-    }, [provider, onChange]);
+    }, [provider, onChange, collaborative]);
 
-    if (!provider) {
+    if (collaborative && !provider) {
         return (
             <div className="yq-document-editor-shell is-loading">
                 Loading collaborative editor...

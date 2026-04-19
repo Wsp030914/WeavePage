@@ -45,6 +45,9 @@ func InitMySQL(cfg *config.Config) (*gorm.DB, error) {
 	if err := ensureTaskVersionColumn(db); err != nil {
 		return nil, err
 	}
+	if err := ensureTaskDocumentColumns(db); err != nil {
+		return nil, err
+	}
 	if err := ensureTaskEventTable(db); err != nil {
 		return nil, err
 	}
@@ -53,6 +56,24 @@ func InitMySQL(cfg *config.Config) (*gorm.DB, error) {
 	}
 
 	return db, nil
+}
+
+func ensureTaskDocumentColumns(db *gorm.DB) error {
+	if db == nil {
+		return fmt.Errorf("mysql schema check failed: db is nil")
+	}
+
+	if !db.Migrator().HasColumn(&models.Task{}, "DocType") {
+		if err := db.Migrator().AddColumn(&models.Task{}, "DocType"); err != nil {
+			return fmt.Errorf("add tasks.doc_type column failed: %w", err)
+		}
+	}
+	if !db.Migrator().HasColumn(&models.Task{}, "CollaborationMode") {
+		if err := db.Migrator().AddColumn(&models.Task{}, "CollaborationMode"); err != nil {
+			return fmt.Errorf("add tasks.collaboration_mode column failed: %w", err)
+		}
+	}
+	return nil
 }
 
 func ensureTaskVersionColumn(db *gorm.DB) error {

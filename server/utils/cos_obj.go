@@ -94,6 +94,71 @@ func PutObj(ctx context.Context, fh *multipart.FileHeader) (key string, url stri
 	return
 }
 
+// COSObjectStore exposes low-level COS object operations for services that
+// already have their own validation and object-key strategy.
+type COSObjectStore struct{}
+
+// NewCOSObjectStore creates a reusable COS-backed object store adapter.
+func NewCOSObjectStore() COSObjectStore {
+	return COSObjectStore{}
+}
+
+// PutObject stores an object at the provided key and returns its public URL.
+func (COSObjectStore) PutObject(ctx context.Context, key string, reader io.Reader, contentType string, contentLength int64) (string, error) {
+	if Client == nil {
+		return "", fmt.Errorf("cos client not initialized")
+	}
+	key = NormalizeObjectKey(key)
+	if key == "" {
+		return "", fmt.Errorf("empty object key")
+	}
+	if strings.TrimSpace(contentType) == "" {
+		contentType = "application/octet-stream"
+	}
+
+	opt := &cos.ObjectPutOptions{
+		ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
+			ContentType: contentType,
+		},
+	}
+	if contentLength > 0 {
+		opt.ContentLength = contentLength
+	}
+
+	resp, err := Client.Object.Put(ctx, key, reader, opt)
+	if err != nil {
+		return "", err
+	}
+	if resp != nil && resp.Body != nil {
+		resp.Body.Close()
+	}
+	return ObjectURLFromKey(key), nil
+}
+
+// GetObject opens an object body for streaming reads.
+func (COSObjectStore) GetObject(ctx context.Context, key string) (io.ReadCloser, error) {
+	if Client == nil {
+		return nil, fmt.Errorf("cos client not initialized")
+	}
+	key = NormalizeObjectKey(key)
+	if key == "" {
+		return nil, fmt.Errorf("empty object key")
+	}
+	resp, err := Client.Object.Get(ctx, key, nil)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || resp.Body == nil {
+		return nil, fmt.Errorf("empty object response body")
+	}
+	return resp.Body, nil
+}
+
+// DeleteObject removes an object by key or URL.
+func (COSObjectStore) DeleteObject(ctx context.Context, key string) error {
+	return DeleteObject(ctx, key)
+}
+
 func DeleteObject(ctx context.Context, key string) error {
 	if Client == nil {
 		return fmt.Errorf("cos client not initialized")

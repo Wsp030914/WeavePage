@@ -12,6 +12,41 @@ definitions:
     - email
     - role
     type: object
+  handler.CompleteDocumentImportReq:
+    properties:
+      title:
+        type: string
+    type: object
+  handler.CreateDocumentImportReq:
+    properties:
+      chunk_size:
+        type: integer
+      collaboration_mode:
+        type: string
+      file_name:
+        type: string
+      project_id:
+        type: integer
+      sha256:
+        type: string
+      title:
+        type: string
+      total_parts:
+        type: integer
+      total_size:
+        type: integer
+    required:
+    - file_name
+    - project_id
+    - total_size
+    type: object
+  handler.CreateMeetingReq:
+    properties:
+      project_id:
+        type: integer
+      title:
+        type: string
+    type: object
   handler.CreateProjectReq:
     properties:
       color:
@@ -25,7 +60,11 @@ definitions:
     type: object
   handler.CreateTaskReq:
     properties:
+      collaboration_mode:
+        type: string
       content_md:
+        type: string
+      doc_type:
         type: string
       due_at:
         type: string
@@ -74,6 +113,16 @@ definitions:
     required:
     - user_id
     type: object
+  handler.SaveDocumentContentReq:
+    properties:
+      content_md:
+        type: string
+      expected_version:
+        type: integer
+    required:
+    - content_md
+    - expected_version
+    type: object
   handler.UpdateProjectReq:
     properties:
       color:
@@ -85,10 +134,14 @@ definitions:
     type: object
   handler.UpdateTaskReq:
     properties:
+      clear_due_at:
+        type: boolean
       content_md:
         type: string
       due_at:
         type: string
+      expected_version:
+        type: integer
       priority:
         type: integer
       project_id:
@@ -119,14 +172,22 @@ definitions:
     type: object
   models.Task:
     properties:
+      collaboration_mode:
+        type: string
       content_md:
         type: string
       created_at:
+        type: string
+      doc_type:
         type: string
       due_at:
         type: string
       id:
         type: integer
+      members:
+        items:
+          $ref: '#/definitions/models.TaskMemberInfo'
+        type: array
       notified:
         type: boolean
       priority:
@@ -141,6 +202,40 @@ definitions:
         type: string
       updated_at:
         type: string
+      user_id:
+        type: integer
+      version:
+        type: integer
+    type: object
+  models.TaskEvent:
+    properties:
+      actor_id:
+        type: integer
+      created_at:
+        type: string
+      event_id:
+        type: string
+      event_type:
+        type: string
+      id:
+        type: integer
+      payload:
+        type: object
+      project_id:
+        type: integer
+      task_id:
+        type: integer
+      task_version:
+        type: integer
+    type: object
+  models.TaskMemberInfo:
+    properties:
+      joined_at:
+        type: string
+      role:
+        type: string
+      user:
+        $ref: '#/definitions/models.UserInfo'
       user_id:
         type: integer
     type: object
@@ -161,6 +256,110 @@ definitions:
       username:
         type: string
     type: object
+  models.UserInfo:
+    properties:
+      avatar_url:
+        type: string
+      username:
+        type: string
+    type: object
+  realtime.ContentServerMessage:
+    properties:
+      actor_id:
+        type: integer
+      duplicate:
+        type: boolean
+      error:
+        type: string
+      has_more:
+        type: boolean
+      message_id:
+        type: string
+      next_cursor:
+        type: integer
+      server_node_id:
+        type: string
+      task_id:
+        type: integer
+      type:
+        type: string
+      update:
+        items:
+          type: integer
+        type: array
+      update_id:
+        type: integer
+      updates:
+        items:
+          $ref: '#/definitions/realtime.ContentUpdateItem'
+        type: array
+    type: object
+  realtime.ContentUpdateItem:
+    properties:
+      actor_id:
+        type: integer
+      id:
+        type: integer
+      message_id:
+        type: string
+      task_id:
+        type: integer
+      update:
+        items:
+          type: integer
+        type: array
+    type: object
+  realtime.ProjectLock:
+    properties:
+      field:
+        type: string
+      holder_user_id:
+        type: integer
+      holder_username:
+        type: string
+      task_id:
+        type: integer
+    type: object
+  realtime.ProjectPresence:
+    properties:
+      connections:
+        type: integer
+      user_id:
+        type: integer
+      username:
+        type: string
+    type: object
+  realtime.ProjectServerMessage:
+    properties:
+      cursor:
+        type: integer
+      error:
+        type: string
+      event:
+        $ref: '#/definitions/models.TaskEvent'
+      event_id:
+        type: string
+      events:
+        items:
+          $ref: '#/definitions/models.TaskEvent'
+        type: array
+      has_more:
+        type: boolean
+      lock:
+        $ref: '#/definitions/realtime.ProjectLock'
+      next_cursor:
+        type: integer
+      presence:
+        items:
+          $ref: '#/definitions/realtime.ProjectPresence'
+        type: array
+      project_id:
+        type: integer
+      server_node_id:
+        type: string
+      type:
+        type: string
+    type: object
   response.PageResult:
     properties:
       list: {}
@@ -179,6 +378,98 @@ definitions:
       message:
         type: string
     type: object
+  service.DiaryTodayResult:
+    properties:
+      project:
+        $ref: '#/definitions/models.Project'
+      task:
+        $ref: '#/definitions/models.Task'
+    type: object
+  service.DocumentImportAssetResult:
+    properties:
+      markdown:
+        type: string
+      original_path:
+        type: string
+      upload_id:
+        type: string
+      url:
+        type: string
+    type: object
+  service.DocumentImportCompleteResult:
+    properties:
+      assets:
+        items:
+          $ref: '#/definitions/service.DocumentImportAssetResult'
+        type: array
+      stats:
+        $ref: '#/definitions/service.DocumentImportCompletionStats'
+      task:
+        $ref: '#/definitions/models.Task'
+    type: object
+  service.DocumentImportCompletionStats:
+    properties:
+      rewritten_links:
+        type: integer
+      size_bytes:
+        type: integer
+    type: object
+  service.DocumentImportPartResult:
+    properties:
+      part_no:
+        type: integer
+      received_parts:
+        type: integer
+      sha256:
+        type: string
+      size:
+        type: integer
+      total_parts:
+        type: integer
+      upload_id:
+        type: string
+      uploaded_at:
+        type: string
+    type: object
+  service.DocumentImportSessionResult:
+    properties:
+      chunk_size:
+        type: integer
+      collaboration_mode:
+        type: string
+      expires_at:
+        type: string
+      file_name:
+        type: string
+      project_id:
+        type: integer
+      title:
+        type: string
+      total_parts:
+        type: integer
+      total_size:
+        type: integer
+      upload_id:
+        type: string
+    type: object
+  service.MeetingCreateResult:
+    properties:
+      project:
+        $ref: '#/definitions/models.Project'
+      task:
+        $ref: '#/definitions/models.Task'
+    type: object
+  service.ProjectSyncResult:
+    properties:
+      events:
+        items:
+          $ref: '#/definitions/models.TaskEvent'
+        type: array
+      has_more:
+        type: boolean
+      next_cursor:
+        type: integer
+    type: object
   service.TaskListResult:
     properties:
       tasks:
@@ -192,7 +483,7 @@ definitions:
 info:
   contact: {}
 paths:
-  /internal/due_callback:
+  /api/internal/scheduler/task-due:
     post:
       consumes:
       - application/json
@@ -223,6 +514,308 @@ paths:
       summary: 任务到期回调
       tags:
       - Internal
+  /diary/today:
+    post:
+      consumes:
+      - application/json
+      description: 查找或创建当前用户的“日记”空间，并打开当天 YYYY-MM-DD.md 私人文档。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 打开成功
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.DiaryTodayResult'
+              type: object
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "500":
+          description: 系统错误
+          schema:
+            $ref: '#/definitions/response.Resp'
+      security:
+      - BearerAuth: []
+      summary: 打开或创建今日日记
+      tags:
+      - Diary
+  /documents/{id}/content:
+    patch:
+      consumes:
+      - application/json
+      description: Saves plain Markdown content for diary documents. Only the owner
+        can save, and this does not write the Yjs update log.
+      parameters:
+      - description: Document ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Content payload
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/handler.SaveDocumentContentReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Saved
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/models.Task'
+              type: object
+        "400":
+          description: Invalid parameters
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "404":
+          description: Document not found
+          schema:
+            $ref: '#/definitions/response.Resp'
+      security:
+      - BearerAuth: []
+      summary: Save plain Markdown document content
+      tags:
+      - Document
+  /documents/imports:
+    post:
+      consumes:
+      - application/json
+      description: Creates a resumable Markdown import session. Use collaboration_mode=collaborative
+        for shared docs or private for private docs.
+      parameters:
+      - description: Import metadata
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateDocumentImportReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Session created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.DocumentImportSessionResult'
+              type: object
+        "400":
+          description: Invalid request parameters
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "403":
+          description: Permission denied
+          schema:
+            $ref: '#/definitions/response.Resp'
+      security:
+      - BearerAuth: []
+      summary: Create Markdown document import session
+      tags:
+      - DocumentImport
+  /documents/imports/{upload_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Deletes temporary uploaded chunks and assets for an unfinished
+        import session.
+      parameters:
+      - description: Upload session id
+        in: path
+        name: upload_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Import aborted
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "403":
+          description: Permission denied
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "404":
+          description: Session not found
+          schema:
+            $ref: '#/definitions/response.Resp'
+      security:
+      - BearerAuth: []
+      summary: Abort Markdown document import
+      tags:
+      - DocumentImport
+  /documents/imports/{upload_id}/assets:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Uploads an image asset referenced by the Markdown file and records
+        its original relative path for link rewriting.
+      parameters:
+      - description: Upload session id
+        in: path
+        name: upload_id
+        required: true
+        type: string
+      - description: Original relative path in Markdown, such as images/a.png
+        in: formData
+        name: original_path
+        type: string
+      - description: Image file
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Asset uploaded
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.DocumentImportAssetResult'
+              type: object
+        "400":
+          description: Invalid request parameters
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "403":
+          description: Permission denied
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "404":
+          description: Session not found
+          schema:
+            $ref: '#/definitions/response.Resp'
+      security:
+      - BearerAuth: []
+      summary: Upload Markdown referenced image
+      tags:
+      - DocumentImport
+  /documents/imports/{upload_id}/complete:
+    post:
+      consumes:
+      - application/json
+      description: Assembles uploaded chunks, rewrites local image references to uploaded
+        asset URLs, and creates a document.
+      parameters:
+      - description: Upload session id
+        in: path
+        name: upload_id
+        required: true
+        type: string
+      - description: Optional completion data
+        in: body
+        name: req
+        schema:
+          $ref: '#/definitions/handler.CompleteDocumentImportReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Document imported
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.DocumentImportCompleteResult'
+              type: object
+        "400":
+          description: Invalid request parameters
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "403":
+          description: Permission denied
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "404":
+          description: Session not found
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "409":
+          description: Upload incomplete or digest mismatch
+          schema:
+            $ref: '#/definitions/response.Resp'
+      security:
+      - BearerAuth: []
+      summary: Complete Markdown document import
+      tags:
+      - DocumentImport
+  /documents/imports/{upload_id}/parts/{part_no}:
+    put:
+      consumes:
+      - application/octet-stream
+      description: Uploads one raw binary Markdown chunk for a resumable import session.
+      parameters:
+      - description: Upload session id
+        in: path
+        name: upload_id
+        required: true
+        type: string
+      - description: 1-based part number
+        in: path
+        name: part_no
+        required: true
+        type: integer
+      - description: Raw chunk bytes
+        in: body
+        name: file
+        required: true
+        schema:
+          type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Part uploaded
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.DocumentImportPartResult'
+              type: object
+        "400":
+          description: Invalid request parameters
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "403":
+          description: Permission denied
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "404":
+          description: Session not found
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "409":
+          description: Session busy or incomplete
+          schema:
+            $ref: '#/definitions/response.Resp'
+      security:
+      - BearerAuth: []
+      summary: Upload Markdown import chunk
+      tags:
+      - DocumentImport
   /login:
     post:
       consumes:
@@ -280,6 +873,42 @@ paths:
       summary: 退出登录
       tags:
       - User
+  /meetings:
+    post:
+      consumes:
+      - application/json
+      description: 新建 Notion 风格会议纪要，默认启用协作并写入会议模板。
+      parameters:
+      - description: 可选：指定 project_id 或自定义标题
+        in: body
+        name: req
+        schema:
+          $ref: '#/definitions/handler.CreateMeetingReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 创建成功
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.MeetingCreateResult'
+              type: object
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "500":
+          description: 系统错误
+          schema:
+            $ref: '#/definitions/response.Resp'
+      security:
+      - BearerAuth: []
+      summary: 新建会议纪要
+      tags:
+      - Meeting
   /projects:
     get:
       consumes:
@@ -453,6 +1082,55 @@ paths:
       summary: 更新项目
       tags:
       - Project
+  /projects/{id}/sync:
+    get:
+      consumes:
+      - application/json
+      description: Returns task event rows after a cursor for reconnect/backfill.
+        The cursor is the task_events auto-increment id.
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Last seen task event id
+        in: query
+        name: cursor
+        type: integer
+      - description: Page size, max 200
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Sync events loaded
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.ProjectSyncResult'
+              type: object
+        "400":
+          description: Invalid request parameters
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "403":
+          description: Permission denied
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "404":
+          description: Project not found
+          schema:
+            $ref: '#/definitions/response.Resp'
+      security:
+      - BearerAuth: []
+      summary: Sync project task events
+      tags:
+      - Realtime
   /projects/{id}/tasks/{task_id}:
     patch:
       consumes:
@@ -566,6 +1244,66 @@ paths:
       summary: 添加任务成员
       tags:
       - Task
+  /projects/{id}/ws:
+    get:
+      consumes:
+      - application/json
+      description: 'Upgrades to a project WebSocket stream for PROJECT_INIT, PROJECT_SYNC,
+        TASK_CREATED, TASK_UPDATED, TASK_DELETED, PRESENCE_SNAPSHOT, TASK_LOCKED,
+        TASK_UNLOCKED, LOCK_ERROR, PING, and PONG messages. Authenticate with Authorization:
+        Bearer <token> or the token query parameter.'
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Bearer JWT
+        in: header
+        name: Authorization
+        type: string
+      - description: JWT when a WebSocket client cannot send Authorization
+        in: query
+        name: token
+        type: string
+      - description: Last seen task event id
+        in: query
+        name: cursor
+        type: integer
+      - description: Alias of cursor
+        in: query
+        name: last_event_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "101":
+          description: Switching Protocols; subsequent frames use this message schema
+          schema:
+            $ref: '#/definitions/realtime.ProjectServerMessage'
+        "400":
+          description: Invalid request parameters
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "401":
+          description: Missing or invalid token
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "403":
+          description: Permission denied
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "404":
+          description: Project not found
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "503":
+          description: WebSocket hub is not configured
+          schema:
+            $ref: '#/definitions/response.Resp'
+      summary: Project realtime WebSocket
+      tags:
+      - Realtime
   /register:
     post:
       consumes:
@@ -766,6 +1504,62 @@ paths:
       summary: 查询任务详情
       tags:
       - Task
+  /tasks/{id}/content/ws:
+    get:
+      consumes:
+      - application/json
+      description: 'Upgrades to a task content WebSocket stream for CONTENT_INIT,
+        CONTENT_SYNC, CONTENT_UPDATE, CONTENT_ACK, CONTENT_ERROR, PING, and PONG messages.
+        Authenticate with Authorization: Bearer <token> or the token query parameter.
+        Diary documents are rejected; save them with PATCH /api/v1/documents/{id}/content.'
+      parameters:
+      - description: Task ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Bearer JWT
+        in: header
+        name: Authorization
+        type: string
+      - description: JWT when a WebSocket client cannot send Authorization
+        in: query
+        name: token
+        type: string
+      - description: Last seen task_content_updates id
+        in: query
+        name: last_update_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "101":
+          description: Switching Protocols; subsequent frames use this message schema
+          schema:
+            $ref: '#/definitions/realtime.ContentServerMessage'
+        "400":
+          description: Invalid request parameters
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "401":
+          description: Missing or invalid token
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "403":
+          description: Permission denied
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "404":
+          description: Task not found
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "503":
+          description: WebSocket hub is not configured
+          schema:
+            $ref: '#/definitions/response.Resp'
+      summary: Task content collaboration WebSocket
+      tags:
+      - Realtime
   /tasks/me:
     get:
       consumes:

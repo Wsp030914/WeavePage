@@ -17,15 +17,21 @@ import (
 )
 
 type taskRepoUpdateStub struct {
-	getByIDFn               func(ctx context.Context, id int) (*models.Task, error)
-	updateFn                func(ctx context.Context, id int, expectedVersion int, updates map[string]interface{}) (*models.Task, error, int64)
-	updateContentSnapshotFn func(ctx context.Context, id int, content string) (int64, error)
-	getByIDCall             int
-	updateCall              int
-	updateContentCall       int
+	createFn                  func(ctx context.Context, task *models.Task) (*models.Task, error)
+	getByIDFn                 func(ctx context.Context, id int) (*models.Task, error)
+	getByUserProjectTitleFn   func(ctx context.Context, userID, projectID int, title string) (*models.Task, error)
+	updateFn                  func(ctx context.Context, id int, expectedVersion int, updates map[string]interface{}) (*models.Task, error, int64)
+	updateContentSnapshotFn   func(ctx context.Context, id int, content string) (int64, error)
+	getByIDCall               int
+	getByUserProjectTitleCall int
+	updateCall                int
+	updateContentCall         int
 }
 
 func (s *taskRepoUpdateStub) Create(ctx context.Context, task *models.Task) (*models.Task, error) {
+	if s.createFn != nil {
+		return s.createFn(ctx, task)
+	}
 	panic("unexpected call to Create")
 }
 
@@ -42,6 +48,10 @@ func (s *taskRepoUpdateStub) GetByIDsAndProject(ctx context.Context, ids []int, 
 }
 
 func (s *taskRepoUpdateStub) GetByUserProjectTitle(ctx context.Context, userID, projectID int, title string) (*models.Task, error) {
+	s.getByUserProjectTitleCall++
+	if s.getByUserProjectTitleFn != nil {
+		return s.getByUserProjectTitleFn(ctx, userID, projectID, title)
+	}
 	panic("unexpected call to GetByUserProjectTitle")
 }
 
@@ -90,11 +100,16 @@ func (s *taskRepoUpdateStub) GetAllIDs(ctx context.Context, projectID int, statu
 }
 
 type taskProjectRepoStub struct {
+	createFn           func(ctx context.Context, project *models.Project) (*models.Project, error)
 	getByIDFn          func(ctx context.Context, id int) (*models.Project, error)
 	getByIDAndUserIDFn func(ctx context.Context, id, userID int) (*models.Project, error)
+	getByUserNameFn    func(ctx context.Context, userID int, name string) (*models.Project, error)
 }
 
 func (s *taskProjectRepoStub) Create(ctx context.Context, project *models.Project) (*models.Project, error) {
+	if s.createFn != nil {
+		return s.createFn(ctx, project)
+	}
 	panic("unexpected call to Create")
 }
 
@@ -110,6 +125,13 @@ func (s *taskProjectRepoStub) GetByIDAndUserID(ctx context.Context, id, userID i
 		return s.getByIDAndUserIDFn(ctx, id, userID)
 	}
 	panic("unexpected call to GetByIDAndUserID")
+}
+
+func (s *taskProjectRepoStub) GetByUserName(ctx context.Context, userID int, name string) (*models.Project, error) {
+	if s.getByUserNameFn != nil {
+		return s.getByUserNameFn(ctx, userID, name)
+	}
+	panic("unexpected call to GetByUserName")
 }
 
 func (s *taskProjectRepoStub) GetByIDsAndUserID(ctx context.Context, ids []int, userID int) ([]models.Project, error) {
@@ -629,6 +651,29 @@ func TestTaskServiceOpenTaskContentSession_OwnerCanEdit(t *testing.T) {
 	}
 }
 
+func TestTaskServiceOpenTaskContentSession_RejectsDiary(t *testing.T) {
+	t.Parallel()
+
+	svc := NewTaskService(TaskServiceDeps{
+		Repo: &taskRepoUpdateStub{getByIDFn: func(ctx context.Context, id int) (*models.Task, error) {
+			return &models.Task{
+				ID:                id,
+				ProjectID:         9,
+				UserID:            7,
+				DocType:           models.DocTypeDiary,
+				CollaborationMode: models.CollaborationModePrivate,
+			}, nil
+		}},
+		TaskMemberRepo: &taskMemberRepoStub{},
+	})
+
+	session, err := svc.OpenTaskContentSession(context.Background(), zap.NewNop(), 7, 1)
+	if session != nil {
+		t.Fatalf("expected no content session, got %+v", session)
+	}
+	assertTaskServiceErrorCode(t, err, apperrors.CodeForbidden)
+}
+
 func TestTaskServiceAppendTaskContentUpdate_RejectsViewer(t *testing.T) {
 	t.Parallel()
 
@@ -751,6 +796,347 @@ func TestTaskServiceSyncTaskContentUpdates_ReturnsCursorPage(t *testing.T) {
 	}
 	if result.NextCursor != 12 {
 		t.Fatalf("expected next cursor 12, got %d", result.NextCursor)
+	}
+}
+
+func TestTaskServiceSavePlainDocumentContent_UsesDiaryOwnerUpdatePath(t *testing.T) {
+	t.Parallel()
+
+	content := "# 2026-04-19\n\nUpdated diary"
+	expectedVersion := 2
+	lockCache := newTaskLockCacheStub()
+	repoStub := &taskRepoUpdateStub{}
+	repoStub.getByIDFn = func(ctx context.Context, id int) (*models.Task, error) {
+		return &models.Task{
+			ID:                id,
+			UserID:            7,
+			ProjectID:         9,
+			Title:             "2026-04-19.md",
+			DocType:           models.DocTypeDiary,
+			CollaborationMode: models.CollaborationModePrivate,
+			Version:           expectedVersion,
+			Status:            models.TaskTodo,
+		}, nil
+	}
+	repoStub.updateFn = func(ctx context.Context, id int, gotVersion int, updates map[string]interface{}) (*models.Task, error, int64) {
+		if id != 1 {
+			t.Fatalf("unexpected task id: got %d", id)
+		}
+		if gotVersion != expectedVersion {
+			t.Fatalf("unexpected expected version: got %d", gotVersion)
+		}
+		if got := updates["content_md"]; got != content {
+			t.Fatalf("unexpected content update: got %#v", got)
+		}
+		return &models.Task{
+			ID:                id,
+			UserID:            7,
+			ProjectID:         9,
+			Title:             "2026-04-19.md",
+			ContentMD:         content,
+			DocType:           models.DocTypeDiary,
+			CollaborationMode: models.CollaborationModePrivate,
+			Version:           expectedVersion + 1,
+			Status:            models.TaskTodo,
+		}, nil, 1
+	}
+
+	svc := NewTaskService(TaskServiceDeps{
+		Repo:      repoStub,
+		TaskCache: taskCacheNoop{},
+		ProjectRepo: &taskProjectRepoStub{getByIDFn: func(ctx context.Context, id int) (*models.Project, error) {
+			if id != 9 {
+				t.Fatalf("unexpected project id: %d", id)
+			}
+			return &models.Project{ID: id, UserID: 7}, nil
+		}},
+		TaskMemberRepo: &taskMemberRepoStub{},
+		UserRepo:       &taskUserRepoStub{},
+		CacheClient:    lockCache,
+	})
+
+	updated, err, affected := svc.SavePlainDocumentContent(context.Background(), zap.NewNop(), 7, 1, SavePlainDocumentContentInput{
+		ContentMD:       content,
+		ExpectedVersion: &expectedVersion,
+	})
+	if err != nil {
+		t.Fatalf("SavePlainDocumentContent returned error: %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("expected affected rows 1, got %d", affected)
+	}
+	if updated == nil || updated.ContentMD != content || updated.Version != expectedVersion+1 {
+		t.Fatalf("unexpected updated task: %+v", updated)
+	}
+	if repoStub.updateCall != 1 {
+		t.Fatalf("expected one update call, got %d", repoStub.updateCall)
+	}
+	if repoStub.updateContentCall != 0 {
+		t.Fatalf("expected no Yjs snapshot update, got %d calls", repoStub.updateContentCall)
+	}
+}
+
+func TestTaskServiceSavePlainDocumentContent_RejectsNonDiaryDocument(t *testing.T) {
+	t.Parallel()
+
+	expectedVersion := 2
+	repoStub := &taskRepoUpdateStub{
+		getByIDFn: func(ctx context.Context, id int) (*models.Task, error) {
+			return &models.Task{
+				ID:                id,
+				UserID:            7,
+				ProjectID:         9,
+				DocType:           models.DocTypeDocument,
+				CollaborationMode: models.CollaborationModeCollaborative,
+				Version:           expectedVersion,
+			}, nil
+		},
+	}
+	svc := NewTaskService(TaskServiceDeps{
+		Repo: repoStub,
+	})
+
+	updated, err, affected := svc.SavePlainDocumentContent(context.Background(), zap.NewNop(), 7, 1, SavePlainDocumentContentInput{
+		ContentMD:       "plain text",
+		ExpectedVersion: &expectedVersion,
+	})
+	if updated != nil {
+		t.Fatalf("expected no updated task, got %+v", updated)
+	}
+	if affected != 0 {
+		t.Fatalf("expected affected rows 0, got %d", affected)
+	}
+	assertTaskServiceErrorCode(t, err, apperrors.CodeForbidden)
+	if repoStub.updateCall != 0 {
+		t.Fatalf("expected repository Update not to be called, got %d", repoStub.updateCall)
+	}
+}
+
+func TestTaskServiceOpenTodayDiary_ReturnsExistingDiary(t *testing.T) {
+	t.Parallel()
+
+	project := &models.Project{ID: 9, UserID: 7, Name: diarySpaceName}
+	task := &models.Task{
+		ID:                12,
+		UserID:            7,
+		ProjectID:         9,
+		Title:             "2026-04-19.md",
+		DocType:           models.DocTypeDiary,
+		CollaborationMode: models.CollaborationModePrivate,
+		Status:            models.TaskTodo,
+	}
+	taskRepo := &taskRepoUpdateStub{
+		getByUserProjectTitleFn: func(ctx context.Context, userID, projectID int, title string) (*models.Task, error) {
+			if userID != 7 || projectID != 9 || title != "2026-04-19.md" {
+				t.Fatalf("unexpected diary lookup: user=%d project=%d title=%q", userID, projectID, title)
+			}
+			return task, nil
+		},
+	}
+	projectRepo := &taskProjectRepoStub{
+		getByUserNameFn: func(ctx context.Context, userID int, name string) (*models.Project, error) {
+			if userID != 7 || name != diarySpaceName {
+				t.Fatalf("unexpected diary space lookup: user=%d name=%q", userID, name)
+			}
+			return project, nil
+		},
+	}
+	svc := NewTaskService(TaskServiceDeps{
+		Repo:        taskRepo,
+		TaskCache:   taskCacheNoop{},
+		ProjectRepo: projectRepo,
+	})
+
+	result, err := svc.OpenTodayDiary(context.Background(), zap.NewNop(), 7, time.Date(2026, 4, 19, 15, 0, 0, 0, time.Local))
+	if err != nil {
+		t.Fatalf("OpenTodayDiary returned error: %v", err)
+	}
+	if result.Project != project || result.Task != task {
+		t.Fatalf("unexpected diary result: %+v", result)
+	}
+}
+
+func TestTaskServiceOpenTodayDiary_CreatesDiarySpaceAndTask(t *testing.T) {
+	t.Parallel()
+
+	createdProject := &models.Project{ID: 11, UserID: 7, Name: diarySpaceName, Color: diarySpaceColor}
+	taskRepo := &taskRepoUpdateStub{
+		getByUserProjectTitleFn: func(ctx context.Context, userID, projectID int, title string) (*models.Task, error) {
+			if userID != 7 || projectID != 11 || title != "2026-04-19.md" {
+				t.Fatalf("unexpected diary lookup: user=%d project=%d title=%q", userID, projectID, title)
+			}
+			return nil, gorm.ErrRecordNotFound
+		},
+		createFn: func(ctx context.Context, task *models.Task) (*models.Task, error) {
+			if task.Title != "2026-04-19.md" {
+				t.Fatalf("unexpected title: %q", task.Title)
+			}
+			if task.DocType != models.DocTypeDiary {
+				t.Fatalf("expected diary doc_type, got %q", task.DocType)
+			}
+			if task.CollaborationMode != models.CollaborationModePrivate {
+				t.Fatalf("expected private collaboration mode, got %q", task.CollaborationMode)
+			}
+			if !strings.Contains(task.ContentMD, "# 2026-04-19") {
+				t.Fatalf("expected diary template content, got %q", task.ContentMD)
+			}
+			task.ID = 21
+			task.Version = 1
+			return task, nil
+		},
+	}
+	projectRepo := &taskProjectRepoStub{
+		getByUserNameFn: func(ctx context.Context, userID int, name string) (*models.Project, error) {
+			return nil, gorm.ErrRecordNotFound
+		},
+		createFn: func(ctx context.Context, project *models.Project) (*models.Project, error) {
+			if project.UserID != 7 || project.Name != diarySpaceName || project.Color != diarySpaceColor {
+				t.Fatalf("unexpected diary project: %+v", project)
+			}
+			return createdProject, nil
+		},
+		getByIDAndUserIDFn: func(ctx context.Context, id, userID int) (*models.Project, error) {
+			if id != 11 || userID != 7 {
+				t.Fatalf("unexpected project permission lookup: id=%d user=%d", id, userID)
+			}
+			return createdProject, nil
+		},
+	}
+	svc := NewTaskService(TaskServiceDeps{
+		Repo:        taskRepo,
+		TaskCache:   taskCacheNoop{},
+		ProjectRepo: projectRepo,
+	})
+
+	result, err := svc.OpenTodayDiary(context.Background(), zap.NewNop(), 7, time.Date(2026, 4, 19, 15, 0, 0, 0, time.Local))
+	if err != nil {
+		t.Fatalf("OpenTodayDiary returned error: %v", err)
+	}
+	if result.Project.ID != 11 || result.Task.ID != 21 {
+		t.Fatalf("unexpected created diary result: %+v", result)
+	}
+	if taskRepo.getByUserProjectTitleCall != 2 {
+		t.Fatalf("expected two title lookups, got %d", taskRepo.getByUserProjectTitleCall)
+	}
+}
+
+func TestTaskServiceCreateMeetingNote_UsesProvidedProject(t *testing.T) {
+	t.Parallel()
+
+	projectID := 21
+	project := &models.Project{ID: projectID, UserID: 7, Name: "Space A"}
+	taskRepo := &taskRepoUpdateStub{
+		createFn: func(ctx context.Context, task *models.Task) (*models.Task, error) {
+			if task.ProjectID != projectID {
+				t.Fatalf("unexpected project id: %d", task.ProjectID)
+			}
+			if task.Title != "Weekly Sync" {
+				t.Fatalf("unexpected title: %q", task.Title)
+			}
+			if task.DocType != models.DocTypeMeeting {
+				t.Fatalf("expected meeting doc_type, got %q", task.DocType)
+			}
+			if task.CollaborationMode != models.CollaborationModeCollaborative {
+				t.Fatalf("expected collaborative mode, got %q", task.CollaborationMode)
+			}
+			if !strings.Contains(task.ContentMD, "## 行动项") {
+				t.Fatalf("expected meeting template content, got %q", task.ContentMD)
+			}
+			task.ID = 31
+			task.Version = 1
+			return task, nil
+		},
+		getByUserProjectTitleFn: func(ctx context.Context, userID, pid int, title string) (*models.Task, error) {
+			return nil, gorm.ErrRecordNotFound
+		},
+	}
+	projectRepo := &taskProjectRepoStub{
+		getByIDAndUserIDFn: func(ctx context.Context, id, userID int) (*models.Project, error) {
+			if id != projectID || userID != 7 {
+				t.Fatalf("unexpected project lookup: id=%d user=%d", id, userID)
+			}
+			return project, nil
+		},
+	}
+	svc := NewTaskService(TaskServiceDeps{
+		Repo:        taskRepo,
+		TaskCache:   taskCacheNoop{},
+		ProjectRepo: projectRepo,
+	})
+
+	result, err := svc.CreateMeetingNote(context.Background(), zap.NewNop(), 7, CreateMeetingInput{
+		ProjectID: &projectID,
+		Title:     "Weekly Sync",
+		Now:       time.Date(2026, 4, 19, 10, 30, 0, 0, time.Local),
+	})
+	if err != nil {
+		t.Fatalf("CreateMeetingNote returned error: %v", err)
+	}
+	if result.Project.ID != projectID || result.Task.ID != 31 {
+		t.Fatalf("unexpected meeting result: %+v", result)
+	}
+}
+
+func TestTaskServiceCreateMeetingNote_CreatesMeetingSpaceAndRetriesTitle(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 4, 19, 10, 30, 15, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	createdProject := &models.Project{ID: 55, UserID: 7, Name: meetingSpaceName, Color: meetingSpaceColor}
+	var createTitles []string
+	taskRepo := &taskRepoUpdateStub{
+		getByUserProjectTitleFn: func(ctx context.Context, userID, pid int, title string) (*models.Task, error) {
+			return nil, gorm.ErrRecordNotFound
+		},
+		createFn: func(ctx context.Context, task *models.Task) (*models.Task, error) {
+			createTitles = append(createTitles, task.Title)
+			if len(createTitles) == 1 {
+				return nil, errors.New("Duplicate entry")
+			}
+			task.ID = 56
+			task.Version = 1
+			return task, nil
+		},
+	}
+	projectRepo := &taskProjectRepoStub{
+		getByUserNameFn: func(ctx context.Context, userID int, name string) (*models.Project, error) {
+			return nil, gorm.ErrRecordNotFound
+		},
+		createFn: func(ctx context.Context, project *models.Project) (*models.Project, error) {
+			if project.UserID != 7 || project.Name != meetingSpaceName || project.Color != meetingSpaceColor {
+				t.Fatalf("unexpected meeting space payload: %+v", project)
+			}
+			return createdProject, nil
+		},
+		getByIDAndUserIDFn: func(ctx context.Context, id, userID int) (*models.Project, error) {
+			if id != createdProject.ID || userID != 7 {
+				t.Fatalf("unexpected project permission lookup: id=%d user=%d", id, userID)
+			}
+			return createdProject, nil
+		},
+	}
+	svc := NewTaskService(TaskServiceDeps{
+		Repo:        taskRepo,
+		TaskCache:   taskCacheNoop{},
+		ProjectRepo: projectRepo,
+	})
+
+	result, err := svc.CreateMeetingNote(context.Background(), zap.NewNop(), 7, CreateMeetingInput{
+		Now: now,
+	})
+	if err != nil {
+		t.Fatalf("CreateMeetingNote returned error: %v", err)
+	}
+	if result.Project.ID != createdProject.ID || result.Task.ID != 56 {
+		t.Fatalf("unexpected meeting result: %+v", result)
+	}
+	if len(createTitles) != 2 {
+		t.Fatalf("expected 2 create attempts, got %d", len(createTitles))
+	}
+	if createTitles[0] != "会议纪要 2026-04-19 10:30" {
+		t.Fatalf("unexpected first title: %q", createTitles[0])
+	}
+	if createTitles[1] != "会议纪要 2026-04-19 10:30 (2)" {
+		t.Fatalf("unexpected retry title: %q", createTitles[1])
 	}
 }
 

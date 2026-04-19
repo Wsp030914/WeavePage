@@ -104,6 +104,7 @@ func main() {
 	userSvc := service.NewUserService(service.UserServiceDeps{
 		Repo:         userRepo,
 		UserCache:    userCache,
+		CacheClient:  redisCache,
 		Bus:          bus,
 		HashPassword: utils.HashPassword,
 		PutAvatar:    utils.PutObj,
@@ -142,13 +143,19 @@ func main() {
 	projectHub := realtime.NewProjectHub(taskSvc, rdb, nodeID, redisCache)
 	contentHub := realtime.NewContentHub(taskSvc, rdb, nodeID)
 	taskSvc.SetTaskEventBroadcaster(projectHub)
+	documentImportSvc := service.NewDocumentImportService(service.DocumentImportServiceDeps{
+		TaskService: taskSvc,
+		Cache:       redisCache,
+		Store:       utils.NewCOSObjectStore(),
+	})
 
 	app := &App{
-		Bus:        bus,
-		Rdb:        rdb,
-		Db:         db,
-		ProjectHub: projectHub,
-		ContentHub: contentHub,
+		Bus:               bus,
+		Rdb:               rdb,
+		Db:                db,
+		ProjectHub:        projectHub,
+		ContentHub:        contentHub,
+		DocumentImportSvc: documentImportSvc,
 	}
 
 	logger := config.InitZap(&cfg.Zap)

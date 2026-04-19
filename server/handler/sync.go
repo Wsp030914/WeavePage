@@ -18,6 +18,21 @@ func NewSyncHandler(svc *service.TaskService) *SyncHandler {
 	return &SyncHandler{svc: svc}
 }
 
+// ProjectEvents
+// @Summary Sync project task events
+// @Description Returns task event rows after a cursor for reconnect/backfill. The cursor is the task_events auto-increment id.
+// @Tags Realtime
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Project ID"
+// @Param cursor query int false "Last seen task event id"
+// @Param limit query int false "Page size, max 200"
+// @Success 200 {object} response.Resp{data=service.ProjectSyncResult} "Sync events loaded"
+// @Failure 400 {object} response.Resp "Invalid request parameters"
+// @Failure 403 {object} response.Resp "Permission denied"
+// @Failure 404 {object} response.Resp "Project not found"
+// @Router /projects/{id}/sync [get]
 func (h *SyncHandler) ProjectEvents(c *gin.Context) {
 	lg := utils.CtxLogger(c)
 	start := time.Now()

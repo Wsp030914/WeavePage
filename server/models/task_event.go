@@ -19,7 +19,7 @@ type TaskEvent struct {
 	ActorID     int             `gorm:"not null;index" json:"actor_id"`
 	EventType   string          `gorm:"size:32;not null;index" json:"event_type"`
 	TaskVersion int             `gorm:"not null;default:0" json:"task_version"`
-	Payload     json.RawMessage `gorm:"type:json;not null" json:"payload"`
+	Payload     json.RawMessage `gorm:"type:json;not null" json:"payload" swaggertype:"object"`
 	CreatedAt   time.Time       `gorm:"index:idx_task_events_project_cursor,priority:3" json:"created_at"`
 }
 

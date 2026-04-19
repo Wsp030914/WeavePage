@@ -17,12 +17,14 @@ import (
 )
 
 type CreateTaskReq struct {
-	Title     string     `json:"title" binding:"required,min=1,max=200"`
-	ProjectID int        `json:"project_id" binding:"required"`
-	ContentMD *string    `json:"content_md"`
-	Priority  *int       `json:"priority"`
-	Status    *string    `json:"status"`
-	DueAt     *time.Time `json:"due_at"`
+	Title             string     `json:"title" binding:"required,min=1,max=200"`
+	ProjectID         int        `json:"project_id" binding:"required"`
+	ContentMD         *string    `json:"content_md"`
+	DocType           string     `json:"doc_type"`
+	CollaborationMode string     `json:"collaboration_mode"`
+	Priority          *int       `json:"priority"`
+	Status            *string    `json:"status"`
+	DueAt             *time.Time `json:"due_at"`
 }
 
 type UpdateTaskReq struct {
@@ -35,6 +37,11 @@ type UpdateTaskReq struct {
 	ReDueAt         *time.Time `json:"due_at"`
 	ClearDue        *bool      `json:"clear_due_at"`
 	ExpectedVersion *int       `json:"expected_version"`
+}
+
+type SaveDocumentContentReq struct {
+	ContentMD       *string `json:"content_md" binding:"required"`
+	ExpectedVersion *int    `json:"expected_version" binding:"required"`
 }
 
 type DueCallbackReq struct {
@@ -214,12 +221,14 @@ func (h *TaskHandler) Create(c *gin.Context) {
 	}
 
 	task, err := h.svc.Create(c.Request.Context(), lg, uid, service.CreateTaskInput{
-		Title:     req.Title,
-		ProjectID: req.ProjectID,
-		ContentMD: req.ContentMD,
-		Priority:  req.Priority,
-		Status:    req.Status,
-		DueAt:     req.DueAt,
+		Title:             req.Title,
+		ProjectID:         req.ProjectID,
+		ContentMD:         req.ContentMD,
+		DocType:           req.DocType,
+		CollaborationMode: req.CollaborationMode,
+		Priority:          req.Priority,
+		Status:            req.Status,
+		DueAt:             req.DueAt,
 	})
 	if err != nil {
 		handleTaskError(c, lg, err, "task.create.failed", start)
@@ -284,6 +293,49 @@ func (h *TaskHandler) Update(c *gin.Context) {
 	}
 
 	response.SuccessWithMsg(c, "更新成功", nil)
+}
+
+// SaveDocumentContent
+// @Summary Save plain Markdown document content
+// @Description Saves plain Markdown content for diary documents. Only the owner can save, and this does not write the Yjs update log.
+// @Tags Document
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Document ID"
+// @Param req body SaveDocumentContentReq true "Content payload"
+// @Success 200 {object} response.Resp{data=models.Task} "Saved"
+// @Failure 400 {object} response.Resp "Invalid parameters"
+// @Failure 403 {object} response.Resp "Forbidden"
+// @Failure 404 {object} response.Resp "Document not found"
+// @Router /documents/{id}/content [patch]
+func (h *TaskHandler) SaveDocumentContent(c *gin.Context) {
+	lg := utils.CtxLogger(c)
+	start := time.Now()
+	uid := c.GetInt("uid")
+
+	taskID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		response.ParamError(c, "invalid document id")
+		return
+	}
+
+	var req SaveDocumentContentReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ParamError(c, "invalid request body")
+		return
+	}
+
+	task, err, _ := h.svc.SavePlainDocumentContent(c.Request.Context(), lg, uid, taskID, service.SavePlainDocumentContentInput{
+		ContentMD:       *req.ContentMD,
+		ExpectedVersion: req.ExpectedVersion,
+	})
+	if err != nil {
+		handleTaskError(c, lg, err, "document.content.save.failed", start)
+		return
+	}
+
+	response.Success(c, task)
 }
 
 // Delete
@@ -402,7 +454,7 @@ func (h *TaskHandler) List(c *gin.Context) {
 // @Param req body DueCallbackReq true "回调信息"
 // @Success 200 {object} response.Resp "回调处理成功"
 // @Failure 401 {object} response.Resp "令牌无效"
-// @Router /internal/due_callback [post]
+// @Router /api/internal/scheduler/task-due [post]
 func (h *TaskHandler) DueCallback(c *gin.Context) {
 	lg := utils.CtxLogger(c)
 	start := time.Now()

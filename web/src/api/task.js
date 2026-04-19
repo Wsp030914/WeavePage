@@ -69,6 +69,14 @@ export const updateTask = async (projectId, taskId, data, expectedVersion) => {
     return client.patch(`/projects/${projectId}/tasks/${taskId}`, payload);
 };
 
+export const saveDocumentContent = async (taskId, data, expectedVersion) => {
+    const payload = typeof expectedVersion === 'number'
+        ? { ...data, expected_version: expectedVersion }
+        : data;
+
+    return client.patch(`/documents/${taskId}/content`, payload);
+};
+
 export const deleteTask = async (id) => {
     return client.delete(`/tasks/${id}`);
 };

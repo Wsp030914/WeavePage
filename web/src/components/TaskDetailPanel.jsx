@@ -1,7 +1,7 @@
 ﻿import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { addTaskMember, removeTaskMember, updateTask } from '../api/task';
+import { addTaskMember, removeTaskMember, saveDocumentContent, updateTask } from '../api/task';
 import { contentConnectionStatus, YjsTaskContentProvider } from '../realtime/yjsTaskContentProvider';
 import {
     METADATA_LOCK_FIELD,
@@ -128,7 +128,7 @@ export default function TaskDetailPanel({
         setContentStatus(contentConnectionStatus.DISCONNECTED);
         setContentError('');
 
-        if (!isOpen || !task?.id) return undefined;
+        if (!isOpen || !task?.id || task.doc_type === 'diary') return undefined;
 
         const provider = new YjsTaskContentProvider({
             taskId: task.id,
@@ -149,7 +149,7 @@ export default function TaskDetailPanel({
             }
             setContentProvider((prev) => (prev === provider ? null : prev));
         };
-    }, [isOpen, task?.id, task?.content_md]);
+    }, [isOpen, task?.id, task?.content_md, task?.doc_type]);
 
     useEffect(() => {
         if (lockError && editingLockRef.current?.taskID === task?.id) {
@@ -163,13 +163,15 @@ export default function TaskDetailPanel({
 
     if (!isOpen || !task || !editData) return null;
     const dueParts = splitDueDateTimeInput(editData.due_at);
-    const metadataLockEnabled = typeof onLockRequest === 'function' && typeof onLockRelease === 'function';
-    const lockedBySelf = isLockHeldByCurrentUser(taskLock, currentUserID);
-    const lockedByOther = isLockHeldByOther(taskLock, currentUserID);
+    const diaryDocument = task.doc_type === 'diary';
+    const privateDocument = task.collaboration_mode === 'private';
+    const metadataLockEnabled = !diaryDocument && typeof onLockRequest === 'function' && typeof onLockRelease === 'function';
+    const lockedBySelf = metadataLockEnabled && isLockHeldByCurrentUser(taskLock, currentUserID);
+    const lockedByOther = metadataLockEnabled && isLockHeldByOther(taskLock, currentUserID);
     const awaitingMetadataLock = metadataLockEnabled && isEditing && !lockedBySelf && !lockedByOther && !lockError;
     const metadataLockBlocked = metadataLockEnabled && (lockedByOther || awaitingMetadataLock || Boolean(lockError));
     const lockHolder = taskLock?.holder_username || `User ${taskLock?.holder_user_id || ''}`.trim();
-    const lockStatusText = lockError
+    const lockStatusText = (metadataLockEnabled && lockError)
         || (lockedByOther ? `Metadata is locked by ${lockHolder}. You can still edit the live document body.` : '')
         || (lockedBySelf ? 'Metadata lock held by you.' : '')
         || (awaitingMetadataLock ? 'Waiting for metadata lock...' : '');
@@ -227,11 +229,25 @@ export default function TaskDetailPanel({
                 payload.clear_due_at = true;
                 nextTask.due_at = null;
             }
-            if (typeof task.version === 'number') {
-                nextTask.version = task.version + 1;
+            let expectedVersion = typeof task.version === 'number' ? task.version : undefined;
+            await updateTask(task.project_id, task.id, payload, expectedVersion);
+            if (typeof expectedVersion === 'number') {
+                expectedVersion += 1;
+                nextTask.version = expectedVersion;
             }
 
-            await updateTask(task.project_id, task.id, payload, task.version);
+            if (diaryDocument) {
+                const savedTask = await saveDocumentContent(task.id, {
+                    content_md: editData.content_md,
+                }, expectedVersion);
+                nextTask.content_md = savedTask?.content_md ?? editData.content_md;
+                if (typeof savedTask?.version === 'number') {
+                    nextTask.version = savedTask.version;
+                } else if (typeof expectedVersion === 'number') {
+                    nextTask.version = expectedVersion + 1;
+                }
+            }
+
             setIsEditing(false);
             releaseMetadataLock();
             if (onTaskUpdated) await onTaskUpdated(nextTask);
@@ -292,13 +308,14 @@ export default function TaskDetailPanel({
         }
     };
 
-    const markdownHTML = DOMPurify.sanitize(marked.parse(editData.content_md || '*No collaborative document content yet*'));
-    const contentStatusLabel = {
+    const emptyContentText = diaryDocument ? '*No diary content yet*' : '*No collaborative document content yet*';
+    const markdownHTML = DOMPurify.sanitize(marked.parse(editData.content_md || emptyContentText));
+    const contentStatusLabel = diaryDocument ? 'Plain Markdown' : ({
         [contentConnectionStatus.CONNECTING]: 'Connecting',
         [contentConnectionStatus.CONNECTED]: 'Live',
         [contentConnectionStatus.DISCONNECTED]: 'Offline',
         [contentConnectionStatus.ERROR]: 'Error',
-    }[contentStatus] || 'Offline';
+    }[contentStatus] || 'Offline');
 
     return (
         <div className={`yq-task-panel-overlay ${isOpen ? 'open' : ''}`} onClick={closePanel}>
@@ -373,6 +390,7 @@ export default function TaskDetailPanel({
                                 {contentError ? <span>{contentError}</span> : null}
                             </div>
 
+                            {!privateDocument ? (
                             <div className="yq-panel-section">
                                 <div className="yq-panel-section-header">
                                     <h3>Collaborators</h3>
@@ -430,6 +448,12 @@ export default function TaskDetailPanel({
                                     )}
                                 </div>
                             </div>
+                            ) : (
+                                <div className="yq-panel-section yq-private-doc-note">
+                                    <h3>Private document</h3>
+                                    <p>This document stays in your personal block. Collaborators cannot be added.</p>
+                                </div>
+                            )}
                         </>
                     ) : (
                         <div className="yq-panel-edit-form">
@@ -506,18 +530,30 @@ export default function TaskDetailPanel({
 
                             <div className="yq-form-group">
                                 <div className="yq-content-editor-header">
-                                    <label className="yq-input-label">Collaborative document (Markdown)</label>
+                                    <label className="yq-input-label">
+                                        {diaryDocument
+                                            ? 'Diary note (plain Markdown)'
+                                            : privateDocument ? 'Private document (Markdown)' : 'Collaborative document (Markdown)'}
+                                    </label>
                                     <span className={`yq-content-sync-status ${contentStatus}`}>
                                         Document sync: {contentStatusLabel}
                                     </span>
                                 </div>
                                 {contentError ? <div className="yq-content-sync-error">{contentError}</div> : null}
                                 <DocumentMarkdownEditor
+                                    key={`${diaryDocument ? 'plain' : 'collab'}-${task.id}`}
                                     provider={contentProvider}
                                     value={editData.content_md}
                                     onChange={onDocumentContentChange}
+                                    collaborative={!diaryDocument}
                                 />
-                                <span className="yq-input-help">Document content is saved live through CodeMirror + Yjs; the Save button only updates metadata.</span>
+                                <span className="yq-input-help">
+                                    {diaryDocument
+                                        ? 'Diary content is saved with the Save button through the plain Markdown API, without Yjs collaboration.'
+                                        : privateDocument
+                                        ? 'Private content is stored on the same Markdown document path, without collaborator access.'
+                                        : 'Document content is saved live through CodeMirror + Yjs; the Save button only updates metadata.'}
+                                </span>
                             </div>
                         </div>
                     )}

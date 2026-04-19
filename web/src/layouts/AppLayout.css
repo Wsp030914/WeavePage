@@ -62,6 +62,7 @@
 
 .yq-main-nav-item {
     min-height: 44px;
+    width: 100%;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -72,6 +73,19 @@
     text-decoration: none;
     margin-bottom: 4px;
     transition: all 0.2s ease;
+}
+
+.yq-main-nav-item.action {
+    border: 0;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.yq-main-nav-item.action:disabled {
+    cursor: wait;
+    opacity: 0.72;
 }
 
 .yq-main-nav-item:hover {
@@ -94,6 +108,16 @@
 .yq-main-nav-item small {
     color: var(--color-sidebar-muted);
     font-size: 11px;
+}
+
+.yq-sidebar-inline-error {
+    margin: 4px 4px 0;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: rgba(214, 88, 88, 0.14);
+    color: #ffb6aa;
+    font-size: 12px;
+    line-height: 1.45;
 }
 
 .yq-list-section {
