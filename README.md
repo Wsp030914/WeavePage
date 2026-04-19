@@ -1,81 +1,113 @@
-# ToDoList
+# WeavePage
 
-一个正在从待办系统重定位为 Obsidian + Notion 风格的协同文档工作台。当前包含用户、空间/项目、协同文档、个人日记、会议纪要、轻量待办和到期提醒底座；仓库内同时包含后端 API、前端页面和独立调度器服务。
+Collaborative Markdown workspace for spaces, live documents, lightweight todos, and knowledge workflows.
 
-## 当前功能
+![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=20232a)
+![Vite](https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white)
+![Yjs](https://img.shields.io/badge/Yjs-CRDT-f7df1e)
+![MySQL](https://img.shields.io/badge/MySQL-required-4479A1?logo=mysql&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-required-DC382D?logo=redis&logoColor=white)
+![Kafka](https://img.shields.io/badge/Kafka-required-231F20?logo=apachekafka&logoColor=white)
 
-- 用户注册、登录、退出登录
-- 用户资料更新和头像上传
-- 空间/项目列表、创建、重命名、删除
-- 空间内文档创建、编辑、删除、详情查看
-- Obsidian Daily Notes 风格日记规划：当天 `YYYY-MM-DD.md`，归属“日记”空间，默认非协同
-- Notion Meeting Notes 风格会议纪要规划：默认模板，支持多人协作
-- 轻量待办模块规划：可创建待办事项，但不作为主要卖点
-- 任务成员添加与移除
-- 我的任务、未来 7 天、日历、个人资料页面
-- 任务到期调度与邮件提醒
-- Redis 缓存、Kafka 异步处理、Swagger API 文档
-- 项目级任务事件 WebSocket room：基于 `task_events` 推送 `TASK_CREATED` / `TASK_UPDATED` / `TASK_DELETED`
-- 项目级在线态感知：项目 WebSocket 推送 `PRESENCE_SNAPSHOT`，项目详情页展示在线人数
-- 项目级 metadata 协同锁：任务详情编辑元数据时申请 `metadata` 锁，其他在线用户可看到锁状态并避免覆盖写入
-- 正文协同后端底座：Yjs update WebSocket 网关、Redis Pub/Sub fan-out、MySQL update log
-- 前端项目详情页增量状态同步：任务创建、状态切换、删除和详情元数据保存会先本地 patch，再通过项目 WebSocket 事件收敛
-- 前端聚合页局部增量更新：今日、未来 7 天、日历页的自身任务写操作会先本地 patch，失败或缺少任务快照时再重新拉取
-- 前端任务详情正文编辑区已接入 Yjs provider，通过 WebSocket 实时同步正文 update
+English | [中文](#中文)
 
-## 仓库结构
+---
 
-- `server/`
-  - Go 后端服务
-- `web/`
-  - React 前端
-- `scheduler/`
-  - Redis 驱动的定时调度服务
-- `docs/`
-  - Swagger 产物与规划文档
+## English
 
-## 运行依赖
+### What is WeavePage?
 
-项目当前依赖以下服务：
+WeavePage is a full-stack collaborative document workspace. It combines a Go API server, a React web app, and a Redis-backed scheduler to support authenticated spaces, Markdown documents, real-time collaboration, presence, metadata locks, and lightweight todo workflows.
 
+The project is evolving from a traditional todo app into an Obsidian + Notion inspired workspace: spaces organize documents, documents can be edited collaboratively, todos stay lightweight, and daily notes / meeting notes are product-level concepts being built on the same foundation.
+
+### Features
+
+- Spaces: create, rename, delete, and browse project-like document spaces.
+- Documents: create, update, delete, open details, and manage metadata with optimistic version checks.
+- Live Markdown body: Yjs CRDT updates over WebSocket, persisted through MySQL update logs.
+- Realtime project stream: WebSocket project room for `TASK_CREATED`, `TASK_UPDATED`, `TASK_DELETED`, `PROJECT_INIT`, and sync compensation.
+- Presence: project-level online user snapshots through `PRESENCE_SNAPSHOT`.
+- Metadata lock: collaborative lock flow for title, priority, reminder time, and other metadata fields.
+- Todos: today, next 7 days, and calendar views remain available as lightweight action views.
+- Scheduler: standalone Redis scheduler for due reminders and server callbacks.
+- Async side effects: Kafka producer / consumer flow with retry and DLQ support.
+- API docs: Swagger output is stored in `docs/`.
+
+### Architecture
+
+```text
+WeavePage/
+├── server/       # Go + Gin API, MySQL repositories, Redis cache/locks, Kafka, WebSocket hubs
+├── web/          # React + Vite frontend, Yjs provider, project event socket, workspace UI
+├── scheduler/    # Standalone Redis-backed job scheduler and callback worker
+├── docs/         # Swagger artifacts, TODO, and implementation plans
+└── .agents/      # Project agent skills for docs, commits, branches, and PR workflows
+```
+
+### Runtime Model
+
+```text
+Browser
+  ├─ HTTP /api/v1
+  ├─ WS /api/v1/projects/:id/ws
+  └─ WS /api/v1/tasks/:id/content/ws
+        │
+        ▼
+Go API Server ── MySQL
+   │  │           ├─ projects / tasks
+   │  │           ├─ task_events
+   │  │           └─ task_content_updates
+   │  │
+   │  ├─ Redis cache + distributed locks + Pub/Sub fan-out
+   │  └─ Kafka async events / retry / DLQ
+   │
+   ▼
+Scheduler ── Redis sorted-set jobs ── callback to API server
+```
+
+### Quick Start
+
+#### Prerequisites
+
+- Go 1.26+
+- Node.js 20+
 - MySQL
 - Redis
 - Kafka
-- Scheduler
 
-生产编排文件已经提供：
-
-- `docker-compose.prod.yml`
-
-## 快速开始
-
-### 方式一：Docker Compose
-
-1. 准备环境变量文件，并将 `ENV_FILE` 指向它  
-   `docker-compose.prod.yml` 默认读取 `${ENV_FILE:-/opt/todolist/secrets/.env.prod}`
-2. 启动服务  
-   `docker compose -f docker-compose.prod.yml up --build`
-3. 访问：
-   - 前端：`http://localhost/`
-   - 后端 Swagger：`http://localhost:8080/swagger/index.html`
-
-### 方式二：本地开发
-
-建议先自己启动 MySQL、Redis、Kafka，再分别启动 3 个服务。
-
-后端：
+#### Clone
 
 ```bash
+git clone git@github.com:Wsp030914/WeavePage.git
+cd WeavePage
+```
+
+#### Backend
+
+Create a local config file outside version control, or point `TODO_CONFIG_FILE` to your own config path.
+
+```bash
+# Windows PowerShell example
+$env:TODO_CONFIG_FILE="E:\path\to\config.yml"
 go run ./server
 ```
 
-调度器：
+The API server listens on port `8080` by default and exposes:
+
+- API: `http://localhost:8080/api/v1`
+- Swagger: `http://localhost:8080/swagger/index.html`
+
+#### Scheduler
 
 ```bash
 go run ./scheduler
 ```
 
-前端：
+The scheduler listens on port `9090` by default and stores jobs in Redis.
+
+#### Frontend
 
 ```bash
 cd web
@@ -83,56 +115,201 @@ npm install
 npm run dev
 ```
 
-Vite 开发代理已配置为：
+The Vite dev server proxies `/api` to `http://localhost:8080` and enables WebSocket proxying for collaboration channels.
 
-- `/api` -> `http://localhost:8080`
+### Configuration
 
-## 配置说明
+Server configuration is loaded from `TODO_CONFIG_FILE` first. If it is not set, the server looks for `config.yml` in the current directory, `./server`, and `./..`.
 
-后端配置由 `server/config.yml` 和 `TODO_*` 环境变量共同决定。
+Environment variables use the `TODO_` prefix. Common examples:
 
-`server/config.yml`、`secrets/`、本地 `.env*`、`.vscode/`、`log/`、`web/node_modules/` 和 `web/dist/` 已通过 `.gitignore` 排除，不应提交到远端仓库。需要共享配置结构时，新增不含真实密钥的 example 文件，而不是提交本机配置或生产密钥。
+```bash
+TODO_CONFIG_FILE=/absolute/path/to/config.yml
+TODO_JWT_SECRET=change-me
+TODO_MYSQL_PASSWORD=change-me
+TODO_REDIS_PASSWORD=change-me
+TODO_DUE_SCHEDULER_CALLBACK_TOKEN=change-me
+```
 
-常见环境变量包括：
+Sensitive local files are intentionally ignored:
 
-- `TODO_CONFIG_FILE`
-- `TODO_JWT_SECRET`
-- `TODO_MYSQL_PASSWORD`
-- `TODO_REDIS_PASSWORD`
-- `TODO_DUE_SCHEDULER_CALLBACK_TOKEN`
+- `server/config.yml`
+- `secrets/`
+- `.env*`
+- `.vscode/`
+- `log/`
+- `web/node_modules/`
+- `web/dist/`
 
-当前 `server/config.yml` 中仍包含 `MUST_SET_IN_ENV` 占位值；在 `release` 模式下，这些占位值不能直接用于生产。
+If you need to share configuration shape, add an example file without real credentials.
 
-## 当前架构要点
+### Development
 
-- 后端主服务使用 Gin 暴露 `/api/v1` 和内部调度回调接口
-- 调度器通过 HTTP 回调 `/api/internal/scheduler/task-due`
-- Kafka 当前用于到期提醒、头像/COS 清理、Token 版本缓存等异步副作用
-- Redis 当前用于缓存和分布式锁
-- Redis Pub/Sub 当前用于项目级任务事件和任务正文 update 的多节点实时 fan-out
+```bash
+# Backend tests
+go test ./...
 
-## 当前限制
+# Frontend lint
+cd web
+npm run lint
 
-- `ProjectDetailPage` 已接入项目级 WebSocket 增量 patch；`MyTasksPage`、`Next7DaysPage`、`CalendarPage` 已减少自身写操作后的 reload，但暂未订阅跨项目实时事件
-- 限流是单机实现
-- `singleflight` 也是单机语义
-- 聚合页仍通过 HTTP 快照初始化，跨项目远端变更暂不实时推送
+# Frontend production build
+npm run build
+```
 
-实时协同改造方案见：
+### Current Status
 
-- `docs/plans/finallist.md`
-- `docs/plans/obsidian-notion-product-redesign.md`
-## 最近新增的协同基础能力
+WeavePage already has the core realtime collaboration foundation: project event WebSocket, document body WebSocket, Yjs update persistence, Redis Pub/Sub fan-out, sync API compensation, presence snapshots, and metadata locks.
 
-- 任务更新链路已支持 `version + expected_version + CAS`，用于拦截陈旧写入。
-- Redis 分布式锁已升级为带 Watchdog 的自动续期实现，降低长编辑会话下的锁误过期风险。
-- 后端已新增 `task_events` 事件日志表和 `GET /api/v1/projects/:id/sync` 增量同步接口，为后续 WebSocket 实时协同提供断线补偿基础。
-- 后端已新增 `GET /api/v1/projects/:id/ws` 项目事件 WebSocket：支持 JWT 自鉴权、项目权限校验、连接后 `PROJECT_INIT` 补偿、本机 room 广播和 Redis Pub/Sub 多节点 fan-out。
-- 前端已新增项目事件客户端和本地 patch store，`ProjectDetailPage` 会消费 `PROJECT_INIT` / `TASK_CREATED` / `TASK_UPDATED` / `TASK_DELETED`，减少任务写操作后的整页重新拉取。
-- 项目事件 WebSocket 已支持 `PRESENCE_SNAPSHOT` 在线态快照；前端会合并各节点快照并在项目详情页显示在线人数。
-- 项目事件 WebSocket 已支持任务 metadata 协同锁；前端项目详情页会展示 `TASK_LOCKED` / `TASK_UNLOCKED`，任务详情面板在编辑元数据前申请锁，并在保存、取消、关闭或切换任务时释放锁。
-- 前端 Today、Next 7 Days 和 Calendar 聚合页已复用本地 patch helper：任务状态切换、删除和详情元数据保存成功后不再强制整页重新拉取；成员变更等没有 task snapshot 的路径仍重新拉取兜底。
-- 后端已新增 `GET /api/v1/tasks/:id/content/ws` 正文协同 WebSocket：支持 JWT 鉴权、task room、本机广播、Redis Pub/Sub 多节点 fan-out、Yjs update 入库和 `message_id` 幂等 ACK。
-- 前端 `TaskDetailPanel` 正文 textarea 已接入 Yjs，正文输入会实时写入正文 WebSocket；任务详情 Save 只更新标题、优先级、截止时间等元数据。
+Daily Notes and Meeting Notes are product concepts built on top of this foundation. The current repository still uses the legacy `projects` and `tasks` data model internally while the UI and product semantics move toward spaces and documents.
 
-> 说明：本仓库已经具备“实时协同底座”的一部分，但还没有完成聚合页跨项目实时事件订阅、分布式限流、分布式缓存击穿保护和 Swagger 产物重生成。
+---
+
+## 中文
+
+### WeavePage 是什么？
+
+WeavePage 是一个全栈协同文档工作台。它由 Go API 服务、React 前端和基于 Redis 的独立调度器组成，支持登录鉴权、空间、Markdown 文档、实时协同、在线态、元数据协同锁和轻量待办工作流。
+
+项目正在从传统待办应用演进为 Obsidian + Notion 风格的工作台：用空间组织文档，用实时协同编辑正文，用轻量待办承接行动项，并在同一底座上继续建设日记和会议纪要能力。
+
+### 功能特性
+
+- 空间：创建、重命名、删除和浏览项目式文档空间。
+- 文档：创建、更新、删除、打开详情，并通过版本号保护元数据写入。
+- 实时 Markdown 正文：基于 Yjs CRDT，通过 WebSocket 传输，并持久化到 MySQL update log。
+- 项目事件流：项目 WebSocket room 推送 `TASK_CREATED`、`TASK_UPDATED`、`TASK_DELETED`、`PROJECT_INIT` 和断线补偿事件。
+- 在线态：通过 `PRESENCE_SNAPSHOT` 展示项目级在线用户快照。
+- 元数据锁：标题、优先级、提醒时间等元数据编辑会走协同锁，降低多人覆盖写入风险。
+- 待办：今日、未来 7 天和日历视图作为轻量行动模块保留。
+- 调度器：独立 Redis 调度服务，用于到期提醒和后端回调。
+- 异步副作用：Kafka producer / consumer，支持重试和 DLQ。
+- API 文档：Swagger 产物保存在 `docs/`。
+
+### 架构
+
+```text
+WeavePage/
+├── server/       # Go + Gin API、MySQL 仓储、Redis 缓存/锁、Kafka、WebSocket hubs
+├── web/          # React + Vite 前端、Yjs provider、项目事件 socket、工作台 UI
+├── scheduler/    # 独立 Redis 定时任务调度器
+├── docs/         # Swagger 产物、TODO 和实施计划
+└── .agents/      # 项目内 agent skills：文档、提交、分支、PR 工作流
+```
+
+### 运行模型
+
+```text
+Browser
+  ├─ HTTP /api/v1
+  ├─ WS /api/v1/projects/:id/ws
+  └─ WS /api/v1/tasks/:id/content/ws
+        │
+        ▼
+Go API Server ── MySQL
+   │  │           ├─ projects / tasks
+   │  │           ├─ task_events
+   │  │           └─ task_content_updates
+   │  │
+   │  ├─ Redis cache + distributed locks + Pub/Sub fan-out
+   │  └─ Kafka async events / retry / DLQ
+   │
+   ▼
+Scheduler ── Redis sorted-set jobs ── callback to API server
+```
+
+### 快速开始
+
+#### 前置要求
+
+- Go 1.26+
+- Node.js 20+
+- MySQL
+- Redis
+- Kafka
+
+#### 克隆仓库
+
+```bash
+git clone git@github.com:Wsp030914/WeavePage.git
+cd WeavePage
+```
+
+#### 后端
+
+请使用本地配置文件，或通过 `TODO_CONFIG_FILE` 指向你的配置路径。真实配置不要提交到仓库。
+
+```bash
+# Windows PowerShell 示例
+$env:TODO_CONFIG_FILE="E:\path\to\config.yml"
+go run ./server
+```
+
+默认端口：
+
+- API：`http://localhost:8080/api/v1`
+- Swagger：`http://localhost:8080/swagger/index.html`
+
+#### 调度器
+
+```bash
+go run ./scheduler
+```
+
+调度器默认监听 `9090`，并将任务存储在 Redis 中。
+
+#### 前端
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Vite 开发服务器会把 `/api` 代理到 `http://localhost:8080`，并已启用 WebSocket 代理以支持实时协同连接。
+
+### 配置
+
+服务端优先读取 `TODO_CONFIG_FILE`。如果没有设置，会在当前目录、`./server` 和 `./..` 查找 `config.yml`。
+
+环境变量使用 `TODO_` 前缀，常见示例：
+
+```bash
+TODO_CONFIG_FILE=/absolute/path/to/config.yml
+TODO_JWT_SECRET=change-me
+TODO_MYSQL_PASSWORD=change-me
+TODO_REDIS_PASSWORD=change-me
+TODO_DUE_SCHEDULER_CALLBACK_TOKEN=change-me
+```
+
+以下本地配置、密钥和运行产物已被忽略，不应上传：
+
+- `server/config.yml`
+- `secrets/`
+- `.env*`
+- `.vscode/`
+- `log/`
+- `web/node_modules/`
+- `web/dist/`
+
+如果需要共享配置结构，请新增不包含真实密钥的 example 文件。
+
+### 开发命令
+
+```bash
+# 后端测试
+go test ./...
+
+# 前端检查
+cd web
+npm run lint
+
+# 前端构建
+npm run build
+```
+
+### 当前状态
+
+WeavePage 已经具备实时协同底座：项目事件 WebSocket、正文 WebSocket、Yjs update 持久化、Redis Pub/Sub 多节点 fan-out、Sync API 断线补偿、在线态快照和元数据协同锁。
+
+日记和会议纪要是建立在这套底座上的产品语义。当前仓库内部仍复用旧的 `projects` 和 `tasks` 数据模型，UI 与产品表达正在逐步迁移到空间和文档。
