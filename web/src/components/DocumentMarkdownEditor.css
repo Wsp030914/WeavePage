@@ -1,0 +1,65 @@
+.yq-document-editor-shell {
+    min-height: 260px;
+    border: 1px solid var(--color-border);
+    border-radius: 16px;
+    overflow: hidden;
+    background:
+        linear-gradient(180deg, rgba(255, 253, 247, 0.95), rgba(255, 250, 240, 0.95)),
+        var(--color-bg-input);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+.yq-document-editor-shell.is-loading {
+    display: grid;
+    place-items: center;
+    min-height: 220px;
+    color: var(--color-text-tertiary);
+    font-size: 13px;
+}
+
+.yq-document-editor-shell .cm-editor {
+    min-height: 260px;
+    background: transparent;
+    color: var(--color-text-primary);
+    font-family: 'Noto Serif SC', 'IBM Plex Sans', serif;
+    font-size: 15px;
+    line-height: 1.72;
+}
+
+.yq-document-editor-shell .cm-focused {
+    outline: none;
+}
+
+.yq-document-editor-shell:focus-within {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(215, 168, 91, 0.16);
+}
+
+.yq-document-editor-shell .cm-scroller {
+    min-height: 260px;
+    padding: 18px 0;
+}
+
+.yq-document-editor-shell .cm-content {
+    padding: 0 22px;
+}
+
+.yq-document-editor-shell .cm-line {
+    padding: 0;
+}
+
+.yq-document-editor-shell .cm-gutters {
+    border-right: 1px solid var(--color-border-soft);
+    background: rgba(247, 244, 236, 0.75);
+    color: var(--color-text-tertiary);
+}
+
+.yq-document-editor-shell .cm-activeLine,
+.yq-document-editor-shell .cm-activeLineGutter {
+    background: rgba(215, 168, 91, 0.09);
+}
+
+.yq-document-editor-shell .cm-selectionBackground,
+.yq-document-editor-shell .cm-content ::selection {
+    background: rgba(125, 140, 163, 0.24) !important;
+}

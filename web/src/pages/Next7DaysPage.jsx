@@ -1,0 +1,176 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { deleteTask, getTasksAcrossProjects, updateTask } from '../api/task';
+import useProjects from '../store/useProjects';
+import Button from '../components/Button';
+import TaskSection from '../components/TaskSection';
+import TaskDetailPanel from '../components/TaskDetailPanel';
+import {
+    applySelectedTaskSnapshot,
+    applyTaskSnapshot,
+    optimisticTaskUpdate,
+    removeTask,
+} from '../store/collab-store';
+import { splitTasksByLifecycle } from '../utils/taskExpiration';
+import { filterTasksByDueRange } from '../utils/taskDueRange';
+import { addShanghaiDays, endOfShanghaiDay, startOfShanghaiDay } from '../utils/shanghaiTime';
+import './ProjectDetailPage.css';
+
+function getNext7DayRange() {
+    const now = new Date();
+    const start = startOfShanghaiDay(now) || now;
+    const endBase = addShanghaiDays(start, 6) || start;
+    const end = endOfShanghaiDay(endBase) || endBase;
+    return { start, end };
+}
+
+export default function Next7DaysPage() {
+    const navigate = useNavigate();
+    const { projects } = useProjects();
+
+    const [tasks, setTasks] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [selectedTask, setSelectedTask] = useState(null);
+
+    const loadTasks = useCallback(async () => {
+        setLoading(true);
+        try {
+            const { start, end } = getNext7DayRange();
+            const allTasks = await getTasksAcrossProjects(projects.map((project) => project.id), 100);
+            const list = filterTasksByDueRange(allTasks, start, end);
+            setTasks(list);
+            setError('');
+        } catch (err) {
+            setError(err.message || 'Failed to load tasks');
+        } finally {
+            setLoading(false);
+        }
+    }, [projects]);
+
+    useEffect(() => {
+        loadTasks();
+    }, [loadTasks]);
+
+    const isTaskVisible = useCallback((task) => {
+        const { start, end } = getNext7DayRange();
+        return filterTasksByDueRange([task], start, end).length > 0;
+    }, []);
+
+    const patchTask = useCallback((task) => {
+        if (!task?.id) return;
+        setTasks((prev) => applyTaskSnapshot(prev, task, isTaskVisible));
+        setSelectedTask((prev) => applySelectedTaskSnapshot(prev, task));
+    }, [isTaskVisible]);
+
+    const { expired: expiredTasks, todo: todoTasks, done: doneTasks } = useMemo(
+        () => splitTasksByLifecycle(tasks),
+        [tasks],
+    );
+
+    const onToggleTask = async (task) => {
+        const nextStatus = task.status === 'done' ? 'todo' : 'done';
+        try {
+            const updatedTask = await updateTask(task.project_id, task.id, { status: nextStatus }, task.version);
+            patchTask(updatedTask || optimisticTaskUpdate(task, { status: nextStatus }));
+        } catch (err) {
+            alert(err.message || 'Failed to update task');
+            await loadTasks();
+        }
+    };
+
+    const onDeleteTask = async (task) => {
+        if (!window.confirm(`Delete task "${task.title}"?`)) return;
+        try {
+            await deleteTask(task.id);
+            setTasks((prev) => removeTask(prev, task.id));
+            setSelectedTask((prev) => (prev?.id === task.id ? null : prev));
+        } catch (err) {
+            alert(err.message || 'Failed to delete task');
+            await loadTasks();
+        }
+    };
+
+    const onPanelTaskUpdated = useCallback(async (task) => {
+        if (task?.id) {
+            patchTask(task);
+            return;
+        }
+        await loadTasks();
+    }, [loadTasks, patchTask]);
+
+    const selectedProject = selectedTask
+        ? projects.find((project) => project.id === selectedTask.project_id) || null
+        : null;
+
+    if (loading) {
+        return <div className="yq-page-container">Loading upcoming todos...</div>;
+    }
+    if (error) {
+        return <div className="yq-page-container yq-error">{error}</div>;
+    }
+
+    return (
+        <div className="yq-page-container yq-board-page">
+            <div className="yq-page-header yq-board-header">
+                <div>
+                    <span className="yq-kicker">Todos</span>
+                    <h1>未来 7 天</h1>
+                </div>
+                <div className="yq-board-tools">
+                    <Button variant="secondary" onClick={loadTasks}>Refresh</Button>
+                </div>
+            </div>
+
+            <TaskSection
+                title="Expired"
+                tasks={expiredTasks}
+                emptyText="No expired tasks in this range."
+                onToggleStatus={onToggleTask}
+                onOpenDetails={setSelectedTask}
+                onDeleteTask={onDeleteTask}
+                onOpenProject={(task) => navigate(`/projects/${task.project_id}`)}
+                completeLabel="Done"
+                restoreLabel="Undo"
+                projectLabel="Space"
+                detailsLabel="Details"
+            />
+
+            <TaskSection
+                title="Open"
+                tasks={todoTasks}
+                emptyText="No upcoming tasks in the next 7 days."
+                onToggleStatus={onToggleTask}
+                onOpenDetails={setSelectedTask}
+                onDeleteTask={onDeleteTask}
+                onOpenProject={(task) => navigate(`/projects/${task.project_id}`)}
+                completeLabel="Done"
+                restoreLabel="Undo"
+                projectLabel="Space"
+                detailsLabel="Details"
+            />
+
+            <TaskSection
+                title="Completed"
+                tasks={doneTasks}
+                emptyText="No completed upcoming tasks."
+                onToggleStatus={onToggleTask}
+                onOpenDetails={setSelectedTask}
+                onDeleteTask={onDeleteTask}
+                onOpenProject={(task) => navigate(`/projects/${task.project_id}`)}
+                completeLabel="Done"
+                restoreLabel="Undo"
+                projectLabel="Space"
+                detailsLabel="Details"
+            />
+
+            <TaskDetailPanel
+                isOpen={Boolean(selectedTask)}
+                onClose={() => setSelectedTask(null)}
+                task={selectedTask}
+                project={selectedProject}
+                onTaskUpdated={onPanelTaskUpdated}
+            />
+        </div>
+    );
+}

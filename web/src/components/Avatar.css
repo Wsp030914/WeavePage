@@ -1,0 +1,15 @@
+.yq-avatar {
+    border-radius: 50%;
+    overflow: hidden;
+    background-color: var(--color-bg-hover);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.yq-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}

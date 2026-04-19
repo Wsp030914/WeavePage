@@ -1,0 +1,122 @@
+.yq-list-page {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.yq-list-toolbar {
+    max-width: 360px;
+}
+
+.yq-kicker {
+    display: inline-flex;
+    margin-bottom: 6px;
+    color: var(--color-text-tertiary);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.yq-project-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 14px;
+}
+
+.yq-project-card {
+    padding: 14px;
+    border-radius: 18px;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-surface);
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.yq-project-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-panel);
+}
+
+.yq-project-open {
+    width: 100%;
+    min-height: 48px;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 14px;
+    background: var(--color-bg-surface-2);
+    color: var(--color-text-primary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    padding: 0 12px;
+    text-align: left;
+}
+
+.yq-project-open:hover {
+    border-color: var(--color-border-strong);
+}
+
+.yq-project-open-editing {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(183, 138, 79, 0.12);
+}
+
+.yq-project-open strong {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.yq-project-inline-input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    color: var(--color-text-primary);
+    font-weight: 700;
+    font-size: 16px;
+    line-height: 1;
+    outline: none;
+}
+
+.yq-project-inline-input::selection {
+    background: rgba(183, 138, 79, 0.25);
+}
+
+.yq-inline-error {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--color-danger);
+}
+
+.yq-project-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.yq-color-picker {
+    margin-top: 12px;
+}
+
+.yq-color-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.yq-color-option {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    cursor: pointer;
+}
+
+.yq-color-option.selected {
+    border-color: #fff;
+    box-shadow: 0 0 0 2px var(--color-primary);
+}

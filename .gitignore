@@ -1,0 +1,32 @@
+gin.log
+.idea/
+.vscode/
+*.iml
+*.log
+log/
+bin/
+*.exe
+
+# Local and secret config files
+.env
+.env.*
+!.env.example
+secrets/
+/config.yml
+/config.local.yml
+server/config.yml
+server/config.local.yml
+server/config.*.yml
+!server/config.example.yml
+scheduler/config.yml
+scheduler/config.local.yml
+scheduler/config.*.yml
+!scheduler/config.example.yml
+*.pem
+*.p12
+*.pfx
+
+# Local build/test artifacts
+.tmp/
+web/node_modules/
+web/dist/

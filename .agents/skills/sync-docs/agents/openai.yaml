@@ -1,0 +1,4 @@
+﻿interface:
+  display_name: "同步项目文档"
+  short_description: "根据本次改动补齐并同步项目文档，避免文档与实现脱节。"
+  default_prompt: "Use $sync-docs to补齐并同步当前项目的 CLAUDE.md、AGENTS.md、README.md、docs/TODO.md 及相关技术文档。"

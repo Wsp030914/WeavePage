@@ -1,0 +1,112 @@
+.yq-board-page {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.yq-board-header {
+    margin-bottom: 8px;
+}
+
+.yq-board-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.yq-project-color {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.yq-board-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.yq-realtime-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 34px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-bg-surface-2);
+    color: var(--color-text-tertiary);
+    padding: 0 12px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.yq-presence-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 34px;
+    border: 1px solid rgba(65, 138, 88, 0.24);
+    border-radius: 999px;
+    background: rgba(65, 138, 88, 0.08);
+    color: var(--color-success);
+    padding: 0 12px;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.yq-realtime-status.connected {
+    border-color: rgba(65, 138, 88, 0.32);
+    color: var(--color-success);
+}
+
+.yq-realtime-status.connecting,
+.yq-realtime-status.disconnected {
+    color: var(--color-text-secondary);
+}
+
+.yq-realtime-status.error {
+    border-color: rgba(188, 79, 63, 0.32);
+    color: #8b3226;
+}
+
+.yq-realtime-error {
+    border: 1px solid rgba(188, 79, 63, 0.28);
+    border-radius: 12px;
+    background: rgba(188, 79, 63, 0.08);
+    color: #8b3226;
+    padding: 9px 12px;
+    font-size: 13px;
+}
+
+.yq-quick-create {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.yq-quick-create-input {
+    min-height: 44px;
+    border-radius: 12px;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-input);
+    color: var(--color-text-primary);
+    padding: 0 14px;
+    outline: none;
+}
+
+.yq-quick-create-input:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(183, 138, 79, 0.15);
+}
+
+@media (max-width: 760px) {
+    .yq-page-header.yq-board-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .yq-quick-create {
+        grid-template-columns: 1fr;
+    }
+}

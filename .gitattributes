@@ -1,0 +1,10 @@
+# 默认：仓库内统一用 LF
+* text=auto eol=lf
+
+# Go / 配置等明确指定 LF
+*.go   text eol=lf
+*.sh   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
