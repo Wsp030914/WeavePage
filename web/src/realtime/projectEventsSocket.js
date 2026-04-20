@@ -153,6 +153,13 @@ export class ProjectEventsSocket {
         });
     }
 
+    viewDocument(taskId = 0) {
+        return this.send({
+            type: projectMessageTypes.VIEW_DOCUMENT,
+            task_id: taskId,
+        });
+    }
+
     scheduleReconnect() {
         if (this.destroyed || this.reconnectTimer) return;
         this.reconnectTimer = window.setTimeout(() => {

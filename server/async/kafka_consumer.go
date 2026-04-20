@@ -1,5 +1,9 @@
 package async
 
+// 文件说明：这个文件实现 Kafka 消费端运行时。
+// 实现方式：通过 worker 池拉取消息，按类型分发到处理器，并内置重试、panic 保护和 DLQ 兜底。
+// 这样做的好处是可靠异步副作用可以独立于主请求链路运行，同时具备基本的故障恢复能力。
+
 import (
 	"context"
 	"encoding/json"
@@ -49,12 +53,14 @@ var ErrDLQNotConfigured = errors.New("dlq not configured")
 
 type KafkaConsumerOption func(*KafkaConsumer)
 
+// WithWorkerCount 配置消费端 worker 数量。
 func WithWorkerCount(workers int) KafkaConsumerOption {
 	return func(c *KafkaConsumer) {
 		c.workers = workers
 	}
 }
 
+// WithBackoff 配置消费失败后的退避区间。
 func WithBackoff(base, max time.Duration) KafkaConsumerOption {
 	return func(c *KafkaConsumer) {
 		c.baseBackoff = base
@@ -62,6 +68,7 @@ func WithBackoff(base, max time.Duration) KafkaConsumerOption {
 	}
 }
 
+// WithDeadLetterQueue 为消费者注入 DLQ 发布能力。
 func WithDeadLetterQueue(producer *KafkaProducer, dlqTopic string) KafkaConsumerOption {
 	return func(c *KafkaConsumer) {
 		c.producer = producer
@@ -69,6 +76,8 @@ func WithDeadLetterQueue(producer *KafkaProducer, dlqTopic string) KafkaConsumer
 	}
 }
 
+// NewKafkaConsumer 创建 Kafka 消费者。
+// 默认从 last offset 开始消费，是为了避免新实例启动时把历史消息整批重复吃一遍。
 func NewKafkaConsumer(brokers []string, topic, groupID string, opts ...KafkaConsumerOption) *KafkaConsumer {
 	lg := zap.L()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -101,6 +110,8 @@ func NewKafkaConsumer(brokers []string, topic, groupID string, opts ...KafkaCons
 	return c
 }
 
+// Register 注册某种事件类型对应的处理函数。
+// 这里对重复注册直接 panic，是为了在启动阶段尽早暴露装配错误。
 func (c *KafkaConsumer) Register(handlerType string, h KafkaHandler) {
 	if _, exists := c.handlers[handlerType]; exists {
 		panic("duplicate handler: " + handlerType)
@@ -108,6 +119,7 @@ func (c *KafkaConsumer) Register(handlerType string, h KafkaHandler) {
 	c.handlers[handlerType] = h
 }
 
+// Start 启动所有消费 worker。
 func (c *KafkaConsumer) Start() {
 	for i := 0; i < c.workers; i++ {
 		c.wg.Add(1)
@@ -116,6 +128,7 @@ func (c *KafkaConsumer) Start() {
 	c.lg.Info("kafka.consumer.started", zap.Int("workers", c.workers))
 }
 
+// Stop 停止消费者并等待 worker 退出。
 func (c *KafkaConsumer) Stop() {
 	c.cancel()
 	c.wg.Wait()
@@ -123,6 +136,8 @@ func (c *KafkaConsumer) Stop() {
 	c.lg.Info("kafka.consumer.stopped")
 }
 
+// worker 是单个消费协程的主循环。
+// 每个 worker 都带 panic 保护，是为了避免某个 handler 崩掉后整个消费者静默退出。
 func (c *KafkaConsumer) worker(id int) {
 	defer c.wg.Done()
 	defer func() {
@@ -172,6 +187,7 @@ func (c *KafkaConsumer) worker(id int) {
 	}
 }
 
+// processMessage 负责反序列化 Kafka 消息、分发处理器并给出是否提交 offset 的结论。
 func (c *KafkaConsumer) processMessage(msg kafka.Message) (bool, error) {
 	var km KafkaMessage
 	if err := json.Unmarshal(msg.Value, &km); err != nil {
@@ -231,6 +247,8 @@ func (c *KafkaConsumer) processMessage(msg kafka.Message) (bool, error) {
 	return true, nil
 }
 
+// commitDecisionAfterFailure 决定失败消息是否转入 DLQ 并提交 offset。
+// 只有成功写入 DLQ 后才允许提交 offset，是为了避免坏消息既处理失败又彻底丢失。
 func (c *KafkaConsumer) commitDecisionAfterFailure(msg kafka.Message, km KafkaMessage, cause error) (bool, error) {
 	if c.producer == nil || c.dlqTopic == "" {
 		return false, fmt.Errorf("%w: %v", ErrDLQNotConfigured, cause)
@@ -250,6 +268,7 @@ func (c *KafkaConsumer) commitDecisionAfterFailure(msg kafka.Message, km KafkaMe
 	return true, nil
 }
 
+// traceIDFromHeaders 从 Kafka header 里提取 trace_id。
 func traceIDFromHeaders(headers []kafka.Header) string {
 	for _, h := range headers {
 		if h.Key == "trace_id" {
@@ -259,6 +278,8 @@ func traceIDFromHeaders(headers []kafka.Header) string {
 	return ""
 }
 
+// executeWithRetry 带指数退避地执行消息处理器。
+// 这里加入 jitter，是为了避免大量失败消息在同一时刻齐刷刷重试。
 func (c *KafkaConsumer) executeWithRetry(ctx context.Context, job KafkaJob, handler KafkaHandler, lg *zap.Logger) error {
 	var err error
 	for retry := 0; retry <= ConsumerMaxRetry; retry++ {
@@ -299,6 +320,8 @@ func (c *KafkaConsumer) executeWithRetry(ctx context.Context, job KafkaJob, hand
 	return fmt.Errorf("max retries exceeded: %w", err)
 }
 
+// safeExecute 在超时和 panic 保护下执行单个 handler。
+// 每次 handler 调用都套独立 30 秒超时，是为了避免某个异步任务无限占住消费 worker。
 func (c *KafkaConsumer) safeExecute(ctx context.Context, job KafkaJob, handler KafkaHandler, lg *zap.Logger) (err error) {
 	defer func() {
 		if r := recover(); r != nil {

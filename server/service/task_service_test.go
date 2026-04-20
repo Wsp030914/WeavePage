@@ -1,10 +1,15 @@
 package service
 
+// 文件说明：这个文件为对应模块提供测试，重点保护关键边界、并发语义和容易回归的行为。
+// 实现方式：通过 stub、最小集成场景或显式断言覆盖最脆弱的逻辑分支。
+// 这样做的好处是后续重构、补注释或调整实现时，可以快速发现行为回归。
+
 import (
 	"ToDoList/server/cache"
 	apperrors "ToDoList/server/errors"
 	"ToDoList/server/models"
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -47,6 +52,10 @@ func (s *taskRepoUpdateStub) GetByIDsAndProject(ctx context.Context, ids []int, 
 	panic("unexpected call to GetByIDsAndProject")
 }
 
+func (s *taskRepoUpdateStub) GetDeletedByIDAndUser(ctx context.Context, id, userID int) (*models.Task, error) {
+	panic("unexpected call to GetDeletedByIDAndUser")
+}
+
 func (s *taskRepoUpdateStub) GetByUserProjectTitle(ctx context.Context, userID, projectID int, title string) (*models.Task, error) {
 	s.getByUserProjectTitleCall++
 	if s.getByUserProjectTitleFn != nil {
@@ -61,6 +70,14 @@ func (s *taskRepoUpdateStub) ListByProject(ctx context.Context, projectID int, s
 
 func (s *taskRepoUpdateStub) ListByMember(ctx context.Context, userID, page, size int, status string, dueStart, dueEnd *time.Time) ([]models.Task, int64, error) {
 	panic("unexpected call to ListByMember")
+}
+
+func (s *taskRepoUpdateStub) SearchByUser(ctx context.Context, userID int, query string, limit int) ([]models.Task, error) {
+	panic("unexpected call to SearchByUser")
+}
+
+func (s *taskRepoUpdateStub) ListDeletedByUser(ctx context.Context, userID, page, size int) ([]models.Task, int64, error) {
+	panic("unexpected call to ListDeletedByUser")
 }
 
 func (s *taskRepoUpdateStub) Update(ctx context.Context, id int, expectedVersion int, updates map[string]interface{}) (*models.Task, error, int64) {
@@ -81,6 +98,14 @@ func (s *taskRepoUpdateStub) UpdateContentSnapshot(ctx context.Context, id int, 
 
 func (s *taskRepoUpdateStub) DeleteByID(ctx context.Context, id int) (int64, error) {
 	panic("unexpected call to DeleteByID")
+}
+
+func (s *taskRepoUpdateStub) SoftDeleteByID(ctx context.Context, id int, deletedBy int, deletedAt time.Time, trashedTitle, deletedTitle string) (int64, error) {
+	panic("unexpected call to SoftDeleteByID")
+}
+
+func (s *taskRepoUpdateStub) RestoreByID(ctx context.Context, id int, title string) (int64, error) {
+	panic("unexpected call to RestoreByID")
 }
 
 func (s *taskRepoUpdateStub) FindDueTasks(ctx context.Context, from, to time.Time, limit int) ([]models.Task, error) {
@@ -148,6 +173,22 @@ func (s *taskProjectRepoStub) Search(ctx context.Context, userID int, name strin
 
 func (s *taskProjectRepoStub) Update(ctx context.Context, id, userID int, updates map[string]interface{}) (*models.Project, error, int64) {
 	panic("unexpected call to Update")
+}
+
+func (s *taskProjectRepoStub) GetDeletedByIDAndUser(ctx context.Context, id, userID int) (*models.Project, error) {
+	panic("unexpected call to GetDeletedByIDAndUser")
+}
+
+func (s *taskProjectRepoStub) ListDeletedByUser(ctx context.Context, userID, page, size int) ([]models.Project, int64, error) {
+	panic("unexpected call to ListDeletedByUser")
+}
+
+func (s *taskProjectRepoStub) SoftDeleteByID(ctx context.Context, id, userID, deletedBy int, deletedAt time.Time, trashedName, deletedName string) (int64, error) {
+	panic("unexpected call to SoftDeleteByID")
+}
+
+func (s *taskProjectRepoStub) RestoreByID(ctx context.Context, id, userID int, name string) (int64, error) {
+	panic("unexpected call to RestoreByID")
 }
 
 func (s *taskProjectRepoStub) DeleteWithTasks(ctx context.Context, id, userID int) (projAffected, taskAffected int64, err error) {
@@ -338,8 +379,11 @@ func (s *taskLockCacheStub) Expire(ctx context.Context, key string, ttl time.Dur
 }
 
 type taskEventRepoStub struct {
-	createFn               func(ctx context.Context, event *models.TaskEvent) (*models.TaskEvent, error)
-	listByProjectAfterIDFn func(ctx context.Context, projectID int, afterID int64, limit int) ([]models.TaskEvent, error)
+	createFn                func(ctx context.Context, event *models.TaskEvent) (*models.TaskEvent, error)
+	listByProjectAfterIDFn  func(ctx context.Context, projectID int, afterID int64, limit int) ([]models.TaskEvent, error)
+	listByProjectBeforeIDFn func(ctx context.Context, projectID int, beforeID int64, limit int) ([]models.TaskEvent, error)
+	listByProjectTaskFn     func(ctx context.Context, projectID int, taskID int, afterID int64, limit int) ([]models.TaskEvent, error)
+	listByProjectTaskPrevFn func(ctx context.Context, projectID int, taskID int, beforeID int64, limit int) ([]models.TaskEvent, error)
 }
 
 func (s *taskEventRepoStub) Create(ctx context.Context, event *models.TaskEvent) (*models.TaskEvent, error) {
@@ -354,6 +398,27 @@ func (s *taskEventRepoStub) ListByProjectAfterID(ctx context.Context, projectID 
 		return s.listByProjectAfterIDFn(ctx, projectID, afterID, limit)
 	}
 	panic("unexpected call to ListByProjectAfterID")
+}
+
+func (s *taskEventRepoStub) ListByProjectTaskAfterID(ctx context.Context, projectID int, taskID int, afterID int64, limit int) ([]models.TaskEvent, error) {
+	if s.listByProjectTaskFn != nil {
+		return s.listByProjectTaskFn(ctx, projectID, taskID, afterID, limit)
+	}
+	panic("unexpected call to ListByProjectTaskAfterID")
+}
+
+func (s *taskEventRepoStub) ListByProjectBeforeID(ctx context.Context, projectID int, beforeID int64, limit int) ([]models.TaskEvent, error) {
+	if s.listByProjectBeforeIDFn != nil {
+		return s.listByProjectBeforeIDFn(ctx, projectID, beforeID, limit)
+	}
+	panic("unexpected call to ListByProjectBeforeID")
+}
+
+func (s *taskEventRepoStub) ListByProjectTaskBeforeID(ctx context.Context, projectID int, taskID int, beforeID int64, limit int) ([]models.TaskEvent, error) {
+	if s.listByProjectTaskPrevFn != nil {
+		return s.listByProjectTaskPrevFn(ctx, projectID, taskID, beforeID, limit)
+	}
+	panic("unexpected call to ListByProjectTaskBeforeID")
 }
 
 type taskContentRepoStub struct {
@@ -399,6 +464,7 @@ func (s *taskEventBroadcasterStub) BroadcastTaskEvent(ctx context.Context, event
 	s.events = append(s.events, event)
 }
 
+// TestTaskServiceUpdate_RequiresExpectedVersion 验证任务元数据更新必须显式携带 expected_version。
 func TestTaskServiceUpdate_RequiresExpectedVersion(t *testing.T) {
 	t.Parallel()
 
@@ -438,6 +504,7 @@ func TestTaskServiceUpdate_RequiresExpectedVersion(t *testing.T) {
 	}
 }
 
+// TestTaskServiceUpdate_ReturnsConflictOnVersionMismatchAfterLock 验证即使已经拿到锁，版本不一致仍然会返回冲突。
 func TestTaskServiceUpdate_ReturnsConflictOnVersionMismatchAfterLock(t *testing.T) {
 	t.Parallel()
 
@@ -496,6 +563,7 @@ func TestTaskServiceUpdate_ReturnsConflictOnVersionMismatchAfterLock(t *testing.
 	}
 }
 
+// TestTaskServiceUpdate_BroadcastsPersistedEventAfterMutation 验证任务更新后会广播已持久化的项目事件。
 func TestTaskServiceUpdate_BroadcastsPersistedEventAfterMutation(t *testing.T) {
 	t.Parallel()
 
@@ -559,6 +627,7 @@ func TestTaskServiceUpdate_BroadcastsPersistedEventAfterMutation(t *testing.T) {
 	}
 }
 
+// TestTaskServiceSyncProjectEvents_ReturnsCursorPage 验证项目事件同步会正确返回游标分页结果。
 func TestTaskServiceSyncProjectEvents_ReturnsCursorPage(t *testing.T) {
 	t.Parallel()
 
@@ -608,6 +677,117 @@ func TestTaskServiceSyncProjectEvents_ReturnsCursorPage(t *testing.T) {
 	}
 }
 
+// TestTaskServiceListProjectActivities_ReturnsCursorPage 验证文档活动记录会正确返回分页结果和活动摘要。
+func TestTaskServiceListProjectActivities_ReturnsCursorPage(t *testing.T) {
+	t.Parallel()
+
+	gotLimit := 0
+	svc := NewTaskService(TaskServiceDeps{
+		EventRepo: &taskEventRepoStub{listByProjectBeforeIDFn: func(ctx context.Context, projectID int, beforeID int64, limit int) ([]models.TaskEvent, error) {
+			if projectID != 9 || beforeID != 20 {
+				t.Fatalf("unexpected activity scope: project=%d cursor=%d", projectID, beforeID)
+			}
+			gotLimit = limit
+			payload1, _ := json.Marshal(models.TaskEventPayload{
+				Task: &models.Task{ID: 4, ProjectID: 9, Title: "Meeting", DocType: models.DocTypeMeeting},
+			})
+			payload2, _ := json.Marshal(models.TaskEventPayload{
+				Task: &models.Task{ID: 4, ProjectID: 9, Title: "Meeting", DocType: models.DocTypeMeeting},
+			})
+			payload3, _ := json.Marshal(models.TaskEventPayload{
+				Task: &models.Task{ID: 8, ProjectID: 9, Title: "Todo", DocType: models.DocTypeTodo},
+			})
+			return []models.TaskEvent{
+				{ID: 13, ProjectID: projectID, TaskID: 8, EventType: models.TaskEventTypeDeleted, Payload: payload3},
+				{ID: 12, ProjectID: projectID, TaskID: 4, EventType: models.TaskEventTypeUpdated, Payload: payload2},
+				{ID: 11, ProjectID: projectID, TaskID: 4, EventType: models.TaskEventTypeCreated, Payload: payload1},
+			}, nil
+		}},
+		TaskCache: taskCacheNoop{},
+		ProjectRepo: &taskProjectRepoStub{getByIDAndUserIDFn: func(ctx context.Context, id, userID int) (*models.Project, error) {
+			return &models.Project{ID: id, UserID: userID}, nil
+		}},
+		TaskMemberRepo: &taskMemberRepoStub{},
+		UserRepo:       &taskUserRepoStub{},
+	})
+
+	result, err := svc.ListProjectActivities(context.Background(), zap.NewNop(), 7, 9, ProjectActivityInput{
+		Cursor: 20,
+		Limit:  2,
+	})
+	if err != nil {
+		t.Fatalf("ListProjectActivities returned error: %v", err)
+	}
+	if gotLimit != 3 {
+		t.Fatalf("expected repository limit 3, got %d", gotLimit)
+	}
+	if len(result.Activities) != 2 {
+		t.Fatalf("expected 2 activities, got %d", len(result.Activities))
+	}
+	if !result.HasMore {
+		t.Fatal("expected HasMore to be true")
+	}
+	if result.NextCursor != 12 {
+		t.Fatalf("expected next cursor 12, got %d", result.NextCursor)
+	}
+	if result.Activities[0].ActivityType != "todo.deleted" || result.Activities[0].Summary != "Moved todo to trash" {
+		t.Fatalf("unexpected first activity: %+v", result.Activities[0])
+	}
+	if result.Activities[1].ActivityType != "meeting.updated" || result.Activities[1].Summary != "Updated meeting note metadata" {
+		t.Fatalf("unexpected second activity: %+v", result.Activities[1])
+	}
+}
+
+// TestTaskServiceListProjectActivities_WithTaskFilter 验证按文档过滤活动记录时会使用 task 维度查询。
+func TestTaskServiceListProjectActivities_WithTaskFilter(t *testing.T) {
+	t.Parallel()
+
+	filterCalled := false
+	svc := NewTaskService(TaskServiceDeps{
+		Repo: &taskRepoUpdateStub{getByIDFn: func(ctx context.Context, id int) (*models.Task, error) {
+			if id != 5 {
+				t.Fatalf("unexpected task lookup id: %d", id)
+			}
+			return &models.Task{ID: 5, ProjectID: 9, UserID: 7, DocType: models.DocTypeTodo}, nil
+		}},
+		EventRepo: &taskEventRepoStub{listByProjectTaskPrevFn: func(ctx context.Context, projectID int, taskID int, beforeID int64, limit int) ([]models.TaskEvent, error) {
+			filterCalled = true
+			if projectID != 9 || taskID != 5 || beforeID != 0 || limit != 51 {
+				t.Fatalf("unexpected filtered activity query: project=%d task=%d cursor=%d limit=%d", projectID, taskID, beforeID, limit)
+			}
+			payload, _ := json.Marshal(models.TaskEventPayload{
+				Task: &models.Task{ID: 5, ProjectID: 9, Title: "Todo", DocType: models.DocTypeTodo},
+			})
+			return []models.TaskEvent{
+				{ID: 21, ProjectID: projectID, TaskID: taskID, EventType: models.TaskEventTypeDeleted, Payload: payload},
+			}, nil
+		}},
+		TaskCache: taskCacheNoop{},
+		ProjectRepo: &taskProjectRepoStub{getByIDAndUserIDFn: func(ctx context.Context, id, userID int) (*models.Project, error) {
+			return &models.Project{ID: id, UserID: userID}, nil
+		}},
+		TaskMemberRepo: &taskMemberRepoStub{},
+		UserRepo:       &taskUserRepoStub{},
+	})
+
+	result, err := svc.ListProjectActivities(context.Background(), zap.NewNop(), 7, 9, ProjectActivityInput{
+		TaskID: 5,
+	})
+	if err != nil {
+		t.Fatalf("ListProjectActivities returned error: %v", err)
+	}
+	if !filterCalled {
+		t.Fatal("expected filtered activity query to be used")
+	}
+	if len(result.Activities) != 1 {
+		t.Fatalf("expected 1 activity, got %d", len(result.Activities))
+	}
+	if result.Activities[0].ActivityType != "todo.deleted" || result.Activities[0].Summary != "Moved todo to trash" {
+		t.Fatalf("unexpected filtered activity: %+v", result.Activities[0])
+	}
+}
+
+// TestTaskServiceOpenProjectRealtimeSession_ChecksProjectAccess 验证打开项目实时会话前会检查项目访问权限。
 func TestTaskServiceOpenProjectRealtimeSession_ChecksProjectAccess(t *testing.T) {
 	t.Parallel()
 
@@ -629,6 +809,7 @@ func TestTaskServiceOpenProjectRealtimeSession_ChecksProjectAccess(t *testing.T)
 	}
 }
 
+// TestTaskServiceOpenTaskContentSession_OwnerCanEdit 验证文档 owner 打开正文会话时拥有编辑能力。
 func TestTaskServiceOpenTaskContentSession_OwnerCanEdit(t *testing.T) {
 	t.Parallel()
 
@@ -651,6 +832,7 @@ func TestTaskServiceOpenTaskContentSession_OwnerCanEdit(t *testing.T) {
 	}
 }
 
+// TestTaskServiceOpenTaskContentSession_RejectsDiary 验证日记文档不会接入正文协同 WebSocket。
 func TestTaskServiceOpenTaskContentSession_RejectsDiary(t *testing.T) {
 	t.Parallel()
 
@@ -674,6 +856,7 @@ func TestTaskServiceOpenTaskContentSession_RejectsDiary(t *testing.T) {
 	assertTaskServiceErrorCode(t, err, apperrors.CodeForbidden)
 }
 
+// TestTaskServiceAppendTaskContentUpdate_RejectsViewer 验证 viewer 角色不能写正文协同增量。
 func TestTaskServiceAppendTaskContentUpdate_RejectsViewer(t *testing.T) {
 	t.Parallel()
 
@@ -695,6 +878,7 @@ func TestTaskServiceAppendTaskContentUpdate_RejectsViewer(t *testing.T) {
 	assertTaskServiceErrorCode(t, err, apperrors.CodeForbidden)
 }
 
+// TestTaskServiceAppendTaskContentUpdate_PersistsAndRefreshesSnapshot 验证正文增量追加后会落库并刷新快照。
 func TestTaskServiceAppendTaskContentUpdate_PersistsAndRefreshesSnapshot(t *testing.T) {
 	t.Parallel()
 
@@ -752,6 +936,7 @@ func TestTaskServiceAppendTaskContentUpdate_PersistsAndRefreshesSnapshot(t *test
 	}
 }
 
+// TestTaskServiceSyncTaskContentUpdates_ReturnsCursorPage 验证正文增量同步会正确返回游标分页结果。
 func TestTaskServiceSyncTaskContentUpdates_ReturnsCursorPage(t *testing.T) {
 	t.Parallel()
 
@@ -799,6 +984,7 @@ func TestTaskServiceSyncTaskContentUpdates_ReturnsCursorPage(t *testing.T) {
 	}
 }
 
+// TestTaskServiceSavePlainDocumentContent_UsesDiaryOwnerUpdatePath 验证日记正文保存走 owner-only 的普通 Markdown 路径。
 func TestTaskServiceSavePlainDocumentContent_UsesDiaryOwnerUpdatePath(t *testing.T) {
 	t.Parallel()
 
@@ -876,6 +1062,7 @@ func TestTaskServiceSavePlainDocumentContent_UsesDiaryOwnerUpdatePath(t *testing
 	}
 }
 
+// TestTaskServiceSavePlainDocumentContent_RejectsNonDiaryDocument 验证普通协作文档不能误走日记保存接口。
 func TestTaskServiceSavePlainDocumentContent_RejectsNonDiaryDocument(t *testing.T) {
 	t.Parallel()
 
@@ -912,6 +1099,7 @@ func TestTaskServiceSavePlainDocumentContent_RejectsNonDiaryDocument(t *testing.
 	}
 }
 
+// TestTaskServiceOpenTodayDiary_ReturnsExistingDiary 验证当天日记已存在时会直接返回现有文档。
 func TestTaskServiceOpenTodayDiary_ReturnsExistingDiary(t *testing.T) {
 	t.Parallel()
 
@@ -956,6 +1144,7 @@ func TestTaskServiceOpenTodayDiary_ReturnsExistingDiary(t *testing.T) {
 	}
 }
 
+// TestTaskServiceOpenTodayDiary_CreatesDiarySpaceAndTask 验证当天日记不存在时会自动创建日记空间和日记文档。
 func TestTaskServiceOpenTodayDiary_CreatesDiarySpaceAndTask(t *testing.T) {
 	t.Parallel()
 
@@ -1020,6 +1209,7 @@ func TestTaskServiceOpenTodayDiary_CreatesDiarySpaceAndTask(t *testing.T) {
 	}
 }
 
+// TestTaskServiceCreateMeetingNote_UsesProvidedProject 验证创建会议纪要时会优先使用显式传入的项目空间。
 func TestTaskServiceCreateMeetingNote_UsesProvidedProject(t *testing.T) {
 	t.Parallel()
 
@@ -1077,6 +1267,7 @@ func TestTaskServiceCreateMeetingNote_UsesProvidedProject(t *testing.T) {
 	}
 }
 
+// TestTaskServiceCreateMeetingNote_CreatesMeetingSpaceAndRetriesTitle 验证会议入口会自动建空间并在标题冲突时重试。
 func TestTaskServiceCreateMeetingNote_CreatesMeetingSpaceAndRetriesTitle(t *testing.T) {
 	t.Parallel()
 

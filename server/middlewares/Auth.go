@@ -1,5 +1,8 @@
-package middlewares
+﻿package middlewares
 
+// 文件说明：这个文件承载 HTTP 横切逻辑。
+// 实现方式：把鉴权、日志、跨域和限流等通用逻辑集中到中间件层。
+// 这样做的好处是接口层更干净，公共策略也更容易统一维护。
 import (
 	apperrors "ToDoList/server/errors"
 	"ToDoList/server/response"

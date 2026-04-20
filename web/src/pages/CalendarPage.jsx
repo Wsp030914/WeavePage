@@ -17,23 +17,24 @@ import {
     getShanghaiMonthGrid,
     getShanghaiParts,
     getShanghaiWeekStart,
-    getTaskCreateDate,
+    parseDateInShanghai,
     isSameShanghaiDay,
     startOfShanghaiDay,
 } from '../utils/shanghaiTime';
+import { isTodoTask } from '../utils/taskTypes';
 import './CalendarPage.css';
 
 const VIEW_OPTIONS = [
-    { key: 'year', label: '年视图' },
-    { key: 'month', label: '月视图' },
-    { key: 'week', label: '周视图' },
-    { key: 'day', label: '日视图' },
-    { key: 'agenda', label: '日程视图' },
+    { key: 'year', label: 'Year' },
+    { key: 'month', label: 'Month' },
+    { key: 'week', label: 'Week' },
+    { key: 'day', label: 'Day' },
+    { key: 'agenda', label: 'Agenda' },
 ];
 
 const STATUS_OPTIONS = [
-    { key: 'all', label: '全部' },
-    { key: 'todo', label: 'Todo' },
+    { key: 'all', label: 'All' },
+    { key: 'todo', label: 'Open' },
     { key: 'done', label: 'Done' },
 ];
 
@@ -69,11 +70,15 @@ function titleForView(view, currentDate) {
     return `${parts.year} 年 ${parts.month + 1} 月 日程`;
 }
 
+function getTodoScheduleDate(task) {
+    return parseDateInShanghai(task?.due_at || task?.created_at || null);
+}
+
 function getTaskMapByDate(tasks) {
     const map = new Map();
 
     tasks.forEach((task) => {
-        const date = getTaskCreateDate(task);
+        const date = getTodoScheduleDate(task);
         if (!date) return;
         const key = getShanghaiDateKey(date);
         if (!map.has(key)) map.set(key, []);
@@ -140,7 +145,7 @@ function WeekColumn({ date, taskMap, onOpenTask, onPickDay }) {
             </button>
             <div className="yq-cal-week-tasks">
                 {tasks.length === 0 ? (
-                    <span className="yq-cal-empty">无任务</span>
+                    <span className="yq-cal-empty">No reminders</span>
                 ) : (
                     tasks.map((task) => <TaskChip key={task.id} task={task} onOpen={onOpenTask} />)
                 )}
@@ -163,10 +168,10 @@ export default function CalendarPage() {
         setLoading(true);
         try {
             const allTasks = await getTasksAcrossProjects(projects.map((project) => project.id), 100);
-            setTasks(allTasks);
+            setTasks(allTasks.filter(isTodoTask));
             setError('');
         } catch (err) {
-            setError(err.message || '加载日历任务失败');
+            setError(err.message || '加载待办日历失败');
         } finally {
             setLoading(false);
         }
@@ -178,7 +183,7 @@ export default function CalendarPage() {
 
     const patchTask = useCallback((task) => {
         if (!task?.id) return;
-        setTasks((prev) => applyTaskSnapshot(prev, task));
+        setTasks((prev) => applyTaskSnapshot(prev, task, isTodoTask));
         setSelectedTask((prev) => applySelectedTaskSnapshot(prev, task));
     }, []);
 
@@ -257,23 +262,24 @@ export default function CalendarPage() {
         return days;
     }, [monthParts, taskMap]);
 
-    if (loading) return <div className="yq-page-container">加载日历中...</div>;
+    if (loading) return <div className="yq-page-container">Loading todo calendar...</div>;
     if (error) return <div className="yq-page-container yq-error">{error}</div>;
 
     return (
         <div className="yq-page-container yq-calendar-page">
             <div className="yq-calendar-toolbar">
                 <div className="yq-calendar-title-wrap">
+                    <span className="yq-kicker">Todos</span>
                     <h1>{titleForView(view, anchorDate)}</h1>
                     <div className="yq-calendar-nav-btns">
                         <Button variant="secondary" data-testid="calendar-prev" onClick={onPrev}>
-                            上一页
+                            Previous
                         </Button>
                         <Button variant="secondary" data-testid="calendar-today" onClick={onToday}>
-                            今天
+                            Today
                         </Button>
                         <Button variant="secondary" data-testid="calendar-next" onClick={onNext}>
-                            下一页
+                            Next
                         </Button>
                     </div>
                 </div>
@@ -391,7 +397,7 @@ export default function CalendarPage() {
                     <h3>{formatShanghaiDateTime(anchorDate, { month: 'long', day: 'numeric', weekday: 'long' })}</h3>
                     <div className="yq-cal-day-list">
                         {dayTasks.length === 0 ? (
-                            <div className="yq-empty-state">当天没有任务</div>
+                            <div className="yq-empty-state">No reminders on this day.</div>
                         ) : (
                             dayTasks.map((task) => (
                                 <button
@@ -402,7 +408,7 @@ export default function CalendarPage() {
                                 >
                                     <div>
                                         <strong>{task.title}</strong>
-                                        <p>{task.content_md ? task.content_md.slice(0, 80) : '无描述'}</p>
+                                        <p>{task.content_md ? task.content_md.slice(0, 80) : 'No notes yet.'}</p>
                                     </div>
                                     <time>
                                         {formatShanghaiDateTime(task.__calendarDate, {
@@ -421,7 +427,7 @@ export default function CalendarPage() {
             {view === 'agenda' && (
                 <div className="yq-cal-agenda">
                     {agendaGroups.length === 0 ? (
-                        <div className="yq-empty-state">本月没有任务</div>
+                        <div className="yq-empty-state">No reminders this month.</div>
                     ) : (
                         agendaGroups.map((group) => (
                             <section key={getShanghaiDateKey(group.date)} className="yq-agenda-group">

@@ -1,4 +1,8 @@
-package service
+﻿package service
+
+// 文件说明：这个文件实现用户账号相关业务，包括登录、注册、资料读取、退出登录和个人资料更新。
+// 实现方式：服务层组合 repo、缓存、事件总线与对象存储能力，统一编排用户数据的一致性和鉴权辅助状态。
+// 这样做的好处是账号规则集中，缓存失效、token 版本和头像资源更新可以放在同一条业务链路里维护。
 
 import (
 	"ToDoList/server/async"
@@ -39,6 +43,7 @@ type UserServiceDeps struct {
 	PutAvatar    func(ctx context.Context, file *multipart.FileHeader) (string, string, error)
 }
 
+// NewUserService 创建用户服务，并补齐默认的密码哈希与头像上传实现。
 func NewUserService(deps UserServiceDeps) *UserService {
 	hashPassword := deps.HashPassword
 	if hashPassword == nil {
@@ -65,11 +70,8 @@ type LoginResult struct {
 	AccessExpireAt time.Time
 }
 
-// Login 验证账号密码并签发 JWT
-// 业务逻辑：
-// 1. 校验用户是否存在
-// 2. 比对哈希密码
-// 3. 签发 AccessToken (有效期 2h)
+// Login 校验账号密码并签发访问令牌。
+// 登录阶段直接查身份标识并比对 bcrypt 哈希，是为了让用户名和邮箱入口共用同一条认证逻辑。
 func (s *UserService) Login(ctx context.Context, lg *zap.Logger, username, password string) (*LoginResult, error) {
 	username = strings.TrimSpace(username)
 	lg = lg.With(zap.String("username", username))
@@ -102,13 +104,8 @@ func (s *UserService) Login(ctx context.Context, lg *zap.Logger, username, passw
 	}, nil
 }
 
-// GetProfile 获取当前用户信息
-// 优先查询 Redis 缓存，如果未命中则查询数据库并回写缓存
-// 业务逻辑：
-// 1. 查询缓存，处理空值标记（防穿透）
-// 2. Singleflight 合并并发请求（防击穿）
-// 3. 查询数据库，若不存在则写入空值缓存
-// 4. 异步回写缓存（防雪崩：随机TTL在Cache层实现）
+// GetProfile 读取当前用户资料。
+// 这里叠加空值缓存、singleflight 和分布式缓存保护，是为了同时防止缓存穿透、击穿和并发回源放大。
 func (s *UserService) GetProfile(ctx context.Context, lg *zap.Logger, uid int) (*models.User, error) {
 	// 1. 查询缓存
 	user, err := s.userCache.GetProfile(ctx, uid)
@@ -166,14 +163,8 @@ type RegisterResult struct {
 	User models.User
 }
 
-// Register 用户注册
-// 业务逻辑：
-// 1. 校验用户名、邮箱是否已存在
-// 2. 校验密码长度
-// 3. 校验头像文件
-// 4. 哈希密码
-// 5. 保存用户到数据库
-// 6. 发布注册事件（异步处理）
+// Register 创建新用户。
+// 注册时强制头像上传并异步发布头像事件，是为了把账号资料初始化到一个完整状态，同时把后续副作用从主链路拆出去。
 func (s *UserService) Register(ctx context.Context, lg *zap.Logger, email, username, password string, avatarFile *multipart.FileHeader) (*RegisterResult, error) {
 	username = strings.TrimSpace(username)
 	email = strings.ToLower(strings.TrimSpace(email))
@@ -241,11 +232,8 @@ func (s *UserService) Register(ctx context.Context, lg *zap.Logger, email, usern
 	return &RegisterResult{User: *created}, nil
 }
 
-// Logout 用户注销, 采用 JWT 黑名单机制
-// 业务逻辑：
-// 1. 校验用户ID和JWT Claims
-// 2. 将JWT ID加入黑名单（设置过期时间为过期时间）
-// 3. 异步删除缓存中的用户信息
+// Logout 把当前 JWT 标记进黑名单。
+// 这里不直接删除客户端 token，而是把 jti 写入缓存黑名单，是因为服务端需要在 token 未过期前也能主动失效它。
 func (s *UserService) Logout(ctx context.Context, lg *zap.Logger, uid int, claims *utils.Claims) error {
 	if uid <= 0 || claims == nil {
 		lg.Warn("logout.invalid_input")
@@ -284,15 +272,8 @@ type UpdateUserResult struct {
 	Token    *TokenInfo
 }
 
-// UpdateUser 更新用户信息
-// 业务逻辑：
-// 1. 校验用户ID和输入参数
-// 2. 校验用户名、邮箱是否已存在（不包括当前用户）
-// 3. 校验密码长度
-// 4. 校验头像文件
-// 5. 哈希密码
-// 6. 更新用户信息到数据库
-// 7. 发布更新事件（异步处理）
+// UpdateUser 更新用户资料、密码和头像。
+// 密码更新时同步提升 token_version 并返回新 token，是为了让旧 token 立即失效，同时不给前端留下重新登录的额外跳转成本。
 func (s *UserService) UpdateUser(ctx context.Context, lg *zap.Logger, uid int, in UpdateUserInput) (*UpdateUserResult, error) {
 	lg.Info("update.user.begin")
 

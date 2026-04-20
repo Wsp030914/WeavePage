@@ -19,3 +19,15 @@ export const updateProject = async (id, data) => {
 export const deleteProject = async (id) => {
     return client.delete(`/projects/${id}`);
 };
+
+export const getTrashSpaces = async (params) => {
+    return client.get('/trash/spaces', { params });
+};
+
+export const restoreTrashSpace = async (id) => {
+    return client.post(`/trash/spaces/${id}/restore`);
+};
+
+export const deleteTrashedSpace = async (id) => {
+    return client.delete(`/trash/spaces/${id}`);
+};

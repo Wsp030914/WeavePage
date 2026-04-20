@@ -1,5 +1,8 @@
-package response
+﻿package response
 
+// 文件说明：这个文件负责统一 API 响应结构。
+// 实现方式：把成功、失败、分页等返回格式集中封装。
+// 这样做的好处是接口响应约定稳定，前后端更容易协同。
 import (
 	apperrors "ToDoList/server/errors"
 	"net/http"

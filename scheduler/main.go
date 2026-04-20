@@ -1,5 +1,8 @@
 package main
 
+// 文件说明：这个文件实现独立调度器进程，负责从 Redis 拉取到期任务并回调后端内部接口。
+// 实现方式：把调度、重试、回调鉴权与白名单控制集中在一个进程里，避免把定时逻辑散落到业务服务。
+// 这样做的好处是调度职责清晰、重试链路独立，后端主服务只关注业务处理。
 import (
 	"bytes"
 	"context"
@@ -58,6 +61,8 @@ type Scheduler struct {
 	retryDelay              time.Duration
 }
 
+// NewScheduler 创建调度器并验证 Redis 可用性。
+// 启动时就做 ping，是为了让调度器在依赖不可用时快速失败，而不是带病运行。
 func NewScheduler(redisAddr, redisPassword, callbackToken string, allowedCallbackPrefixes []string) *Scheduler {
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     redisAddr,
@@ -79,6 +84,8 @@ func NewScheduler(redisAddr, redisPassword, callbackToken string, allowedCallbac
 	}
 }
 
+// Schedule 把任务详情写入 KV，再把 jobID 放进按时间排序的 ZSet。
+// 这样做的好处是可以同时按时间扫描到期任务，并在执行时拿到完整回调信息。
 func (s *Scheduler) Schedule(req ScheduleTaskRequest) {
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -101,6 +108,7 @@ func (s *Scheduler) Schedule(req ScheduleTaskRequest) {
 	log.Printf("[Scheduler] Scheduled job %s to run at %v", req.JobID, req.RunAt)
 }
 
+// Cancel 同时从调度队列和任务详情里删除 job。
 func (s *Scheduler) Cancel(jobID string) {
 	pipe := s.client.Pipeline()
 	pipe.ZRem(s.ctx, schedulerJobsKey, jobID)
@@ -113,6 +121,8 @@ func (s *Scheduler) Cancel(jobID string) {
 	log.Printf("[Scheduler] Canceled job %s", jobID)
 }
 
+// Run 每秒扫描一次到期任务，并并发处理本轮扫描到的 job。
+// 这里把“扫描”和“执行”拆开，是为了让队列轮询保持简单稳定。
 func (s *Scheduler) Run() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -153,6 +163,8 @@ func (s *Scheduler) Run() {
 	}
 }
 
+// processJob 负责单个任务的完整执行生命周期：抢处理锁、取详情、执行回调、失败重试或成功清理。
+// 处理锁的存在是为了防止多个调度器实例同时消费到同一个到期任务。
 func (s *Scheduler) processJob(jobID string) {
 	lockKey := s.processingKey(jobID)
 	acquired, err := s.client.SetNX(s.ctx, lockKey, "1", processingLockTTL).Result()

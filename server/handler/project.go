@@ -1,5 +1,9 @@
 package handler
 
+// 文件说明：这个文件负责项目空间相关的 HTTP 接口。
+// 实现方式：在接口层完成参数绑定、分页解析和错误映射，具体业务编排交给 ProjectService。
+// 这样做的好处是空间接口能保持稳定协议面，而缓存、权限和列表降级逻辑全部沉到服务层处理。
+
 import (
 	apperrors "ToDoList/server/errors"
 	"ToDoList/server/response"
@@ -27,13 +31,14 @@ type ProjectHandler struct {
 	svc *service.ProjectService
 }
 
+// NewProjectHandler 创建项目接口处理器。
 func NewProjectHandler(svc *service.ProjectService) *ProjectHandler {
 	return &ProjectHandler{svc: svc}
 }
 
-// Create
+// Create 创建一个新的项目空间。
 // @Summary 创建项目
-// @Description 创建新的项目
+// @Description 创建新的项目空间
 // @Tags Project
 // @Accept json
 // @Produce json
@@ -63,9 +68,9 @@ func (h *ProjectHandler) Create(c *gin.Context) {
 	response.Success(c, project)
 }
 
-// GetProjectByID
+// GetProjectByID 查询单个项目详情。
 // @Summary 获取项目详情
-// @Description 根据ID获取项目信息
+// @Description 根据 ID 获取项目信息
 // @Tags Project
 // @Accept json
 // @Produce json
@@ -95,9 +100,9 @@ func (h *ProjectHandler) GetProjectByID(c *gin.Context) {
 	response.Success(c, project)
 }
 
-// Search
+// Search 返回项目列表或搜索结果。
 // @Summary 项目列表/搜索
-// @Description 获取项目列表，支持按名称搜索
+// @Description 获取项目列表，并支持按名称搜索
 // @Tags Project
 // @Accept json
 // @Produce json
@@ -129,9 +134,9 @@ func (h *ProjectHandler) Search(c *gin.Context) {
 	response.PageData(c, result.Projects, result.Total, page, size)
 }
 
-// Update
+// Update 更新项目元数据。
 // @Summary 更新项目
-// @Description 更新项目信息（名称、颜色等）
+// @Description 更新项目名称、颜色和排序等信息
 // @Tags Project
 // @Accept json
 // @Produce json
@@ -172,7 +177,7 @@ func (h *ProjectHandler) Update(c *gin.Context) {
 	response.SuccessWithMsg(c, "更新成功", nil)
 }
 
-// Delete
+// Delete 删除项目及其关联任务。
 // @Summary 删除项目
 // @Description 删除指定项目及其关联任务
 // @Tags Project
@@ -204,6 +209,83 @@ func (h *ProjectHandler) Delete(c *gin.Context) {
 	response.SuccessWithMsg(c, "删除成功", nil)
 }
 
+// ListTrash 列出已删除空间。
+// @Summary List trashed spaces
+// @Description Returns soft-deleted spaces for the current user.
+// @Tags Project
+// @Produce json
+// @Security BearerAuth
+// @Param page query int false "页码"
+// @Param size query int false "每页数量"
+// @Success 200 {object} response.Resp{data=response.PageResult} "获取成功"
+// @Router /trash/spaces [get]
+func (h *ProjectHandler) ListTrash(c *gin.Context) {
+	lg := utils.CtxLogger(c)
+	start := time.Now()
+	uid := c.GetInt("uid")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
+
+	result, err := h.svc.ListTrash(c.Request.Context(), lg, uid, service.SpaceTrashListInput{Page: page, Size: size})
+	if err != nil {
+		handleProjectError(c, lg, err, "project.list_trash.failed", start)
+		return
+	}
+	response.PageData(c, result.Projects, result.Total, page, size)
+}
+
+// RestoreFromTrash 恢复已删除空间。
+// @Summary Restore space from trash
+// @Description Restores a soft-deleted space.
+// @Tags Project
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Space ID"
+// @Success 200 {object} response.Resp{data=models.Project} "恢复成功"
+// @Router /trash/spaces/{id}/restore [post]
+func (h *ProjectHandler) RestoreFromTrash(c *gin.Context) {
+	lg := utils.CtxLogger(c)
+	start := time.Now()
+	uid := c.GetInt("uid")
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		response.ParamError(c, "空间ID无效")
+		return
+	}
+	project, err := h.svc.RestoreFromTrash(c.Request.Context(), lg, uid, id)
+	if err != nil {
+		handleProjectError(c, lg, err, "project.restore.failed", start)
+		return
+	}
+	response.Success(c, project)
+}
+
+// DeleteFromTrash 彻底删除已删除空间。
+// @Summary Permanently delete trashed space
+// @Description Permanently deletes a space that is already in trash.
+// @Tags Project
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Space ID"
+// @Success 200 {object} response.Resp "删除成功"
+// @Router /trash/spaces/{id} [delete]
+func (h *ProjectHandler) DeleteFromTrash(c *gin.Context) {
+	lg := utils.CtxLogger(c)
+	start := time.Now()
+	uid := c.GetInt("uid")
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		response.ParamError(c, "空间ID无效")
+		return
+	}
+	if _, err = h.svc.DeleteFromTrash(c.Request.Context(), lg, uid, id); err != nil {
+		handleProjectError(c, lg, err, "project.delete_from_trash.failed", start)
+		return
+	}
+	response.SuccessWithMsg(c, "deleted", nil)
+}
+
+// handleProjectError 统一把项目域业务错误映射成 HTTP 响应。
 func handleProjectError(c *gin.Context, lg *zap.Logger, err error, logMsg string, start time.Time) {
 	var appErr *apperrors.Error
 	if apperrors.As(err, &appErr) {

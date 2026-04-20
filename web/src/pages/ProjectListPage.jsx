@@ -25,6 +25,23 @@ export default function ProjectListPage() {
         return projects.filter((project) => project.name.toLowerCase().includes(keyword));
     }, [projects, search]);
 
+    const diaryProject = useMemo(
+        () => projects.find((project) => (project.name || '').trim() === '日记') || null,
+        [projects],
+    );
+
+    const meetingProject = useMemo(
+        () => projects.find((project) => (project.name || '').trim() === '会议') || null,
+        [projects],
+    );
+
+    const inboxProject = useMemo(() => (
+        projects.find((project) => {
+            const name = (project.name || '').trim().toLowerCase();
+            return name === 'inbox' || name === '收件箱' || name === '收集箱';
+        }) || null
+    ), [projects]);
+
     const onCreateProject = async () => {
         if (!form.name.trim() || creating) return;
         setCreating(true);
@@ -78,7 +95,7 @@ export default function ProjectListPage() {
     };
 
     const onDeleteProject = async (project) => {
-        if (!window.confirm(`Delete space "${project.name}"?`)) return;
+        if (!window.confirm(`Move space "${project.name}" to trash? You can restore it from Trash.`)) return;
         try {
             await removeProject(project.id);
         } catch (err) {
@@ -91,18 +108,45 @@ export default function ProjectListPage() {
     return (
         <div className="yq-page-container yq-list-page">
             <div className="yq-page-header">
-                <div>
-                    <span className="yq-kicker">Workspace</span>
-                    <h1>空间</h1>
+                <div className="yq-space-hero-copy">
+                    <span className="yq-kicker">Spaces</span>
+                    <h1>Workspace Spaces</h1>
+                    <p>
+                        Organize collaborative docs, private drafts, daily notes, meeting notes, and lightweight todos
+                        around clear space boundaries.
+                    </p>
                 </div>
-                <Button onClick={() => setIsModalOpen(true)}>新建空间</Button>
+                <Button onClick={() => setIsModalOpen(true)}>New Space</Button>
+            </div>
+
+            <div className="yq-space-summary-grid">
+                <article className="yq-space-summary-card">
+                    <span className="yq-space-summary-label">Total Spaces</span>
+                    <strong>{projects.length}</strong>
+                    <p>Shared working areas for docs, meetings, and focused planning.</p>
+                </article>
+                <article className="yq-space-summary-card">
+                    <span className="yq-space-summary-label">Daily Notes</span>
+                    <strong>{diaryProject ? 'Ready' : 'Not started'}</strong>
+                    <p>{diaryProject ? `Stored in ${diaryProject.name}` : 'Open the Daily Notes entry in the sidebar to create today\'s note.'}</p>
+                </article>
+                <article className="yq-space-summary-card">
+                    <span className="yq-space-summary-label">Meetings</span>
+                    <strong>{meetingProject ? 'Ready' : 'Not started'}</strong>
+                    <p>{meetingProject ? `Meeting notes are grouped in ${meetingProject.name}.` : 'Use the Meetings entry to create a collaborative meeting note.'}</p>
+                </article>
+                <article className="yq-space-summary-card">
+                    <span className="yq-space-summary-label">Capture</span>
+                    <strong>{inboxProject ? 'Inbox ready' : 'Create a lane'}</strong>
+                    <p>{inboxProject ? 'Inbox can absorb quick documents and action items before they are sorted.' : 'Create an Inbox-style space when you want a quick capture lane.'}</p>
+                </article>
             </div>
 
             <div className="yq-list-toolbar">
                 <Input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
-                    placeholder="搜索空间"
+                    placeholder="Search spaces"
                     style={{ marginBottom: 0 }}
                 />
             </div>
@@ -144,7 +188,18 @@ export default function ProjectListPage() {
                                     onClick={() => navigate(`/projects/${project.id}`)}
                                 >
                                     <span className="yq-project-dot" style={{ backgroundColor: project.color }} />
-                                    <strong>{project.name}</strong>
+                                    <div className="yq-project-card-main">
+                                        <strong>{project.name}</strong>
+                                        <span className="yq-project-card-meta">
+                                            {project.id === diaryProject?.id
+                                                ? 'Daily Notes'
+                                                : project.id === meetingProject?.id
+                                                    ? 'Meetings'
+                                                    : project.id === inboxProject?.id
+                                                        ? 'Inbox'
+                                                        : 'Space'}
+                                        </span>
+                                    </div>
                                 </button>
                             )}
                             {editingProjectID === project.id && renameError && (
@@ -170,7 +225,7 @@ export default function ProjectListPage() {
 
                     {filtered.length === 0 && (
                         <div className="yq-empty-state">
-                            还没有空间。先创建一个空间，用它组织文档、会议和轻量待办。
+                            No spaces found. Create one to organize docs, meetings, and lightweight todos.
                         </div>
                     )}
                 </div>
@@ -179,7 +234,7 @@ export default function ProjectListPage() {
             <Modal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
-                title="创建新空间"
+                title="Create New Space"
                 footer={
                     <>
                         <Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>
@@ -190,13 +245,13 @@ export default function ProjectListPage() {
                 }
             >
                 <Input
-                    label="空间名称"
+                    label="Space name"
                     value={form.name}
                     onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
                     autoFocus
                 />
                 <div className="yq-color-picker">
-                    <label className="yq-input-label">空间颜色</label>
+                    <label className="yq-input-label">Space color</label>
                     <div className="yq-color-options">
                         {colors.map((color) => (
                             <button

@@ -1,5 +1,9 @@
 package service
 
+// 文件说明：这个文件封装任务到期调度器的客户端调用。
+// 实现方式：通过一个抽象接口屏蔽 noop 和 HTTP 两种实现，再把调度、取消、健康检查统一成标准方法。
+// 这样做的好处是任务服务只依赖调度能力本身，不需要感知调度器部署方式或具体协议细节。
+
 import (
 	"bytes"
 	"context"
@@ -71,6 +75,7 @@ type cancelTaskRequest struct {
 	JobID string `json:"job_id"`
 }
 
+// NewHTTPDueScheduler 创建基于 HTTP 回调的到期调度器客户端。
 func NewHTTPDueScheduler(cfg HTTPDueSchedulerConfig) DueScheduler {
 	return &httpDueScheduler{
 		scheduleURL:    cfg.ScheduleURL,
@@ -85,6 +90,8 @@ func NewHTTPDueScheduler(cfg HTTPDueSchedulerConfig) DueScheduler {
 	}
 }
 
+// Ping 检查调度器服务是否可用。
+// 把健康检查单独抽出来，是为了让主服务启动时能尽早发现调度器不可达，而不是等第一次写入到期任务时才暴露。
 func (s *httpDueScheduler) Ping(ctx context.Context) error {
 	if s.pingURL == "" {
 		return nil
@@ -107,6 +114,8 @@ func (s *httpDueScheduler) Ping(ctx context.Context) error {
 	return nil
 }
 
+// ScheduleTaskOnce 为任务注册一次性到期回调。
+// 这里把 callback token 一起塞进调度负载和请求头，是为了同时兼容调度器转发链路和直连链路的鉴权。
 func (s *httpDueScheduler) ScheduleTaskOnce(ctx context.Context, taskID int, dueAt time.Time) error {
 	if taskID <= 0 {
 		return errors.New("invalid task id")
@@ -127,6 +136,7 @@ func (s *httpDueScheduler) ScheduleTaskOnce(ctx context.Context, taskID int, due
 	return s.postJSON(ctx, s.scheduleURL, reqBody)
 }
 
+// CancelTask 取消一个任务的到期调度。
 func (s *httpDueScheduler) CancelTask(ctx context.Context, taskID int) error {
 	if taskID <= 0 {
 		return errors.New("invalid task id")
@@ -138,6 +148,8 @@ func (s *httpDueScheduler) CancelTask(ctx context.Context, taskID int) error {
 	return s.postJSON(ctx, s.cancelURL, reqBody)
 }
 
+// postJSON 发送调度器请求。
+// 统一封装超时、JSON 编码和错误状态码判断，是为了让调度相关接口保持同一套失败语义。
 func (s *httpDueScheduler) postJSON(ctx context.Context, endpoint string, body any) error {
 	if strings.TrimSpace(endpoint) == "" {
 		return errors.New("scheduler endpoint is empty")
@@ -174,6 +186,8 @@ func (s *httpDueScheduler) postJSON(ctx context.Context, endpoint string, body a
 	return nil
 }
 
+// dueTaskJobID 生成任务到期作业 ID。
+// 作业 ID 稳定绑定 taskID，能让重复调度直接覆盖同一作业，避免积累多条过期任务。
 func dueTaskJobID(taskID int) string {
 	return fmt.Sprintf("todo-task-due-%d", taskID)
 }

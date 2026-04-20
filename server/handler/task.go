@@ -1,5 +1,8 @@
-package handler
+﻿package handler
 
+// 文件说明：这个文件负责任务、文档、回收站和到期回调相关的 HTTP 接口。
+// 实现方式：handler 只做参数解析、鉴权上下文提取、错误映射和响应组装，业务规则放在 service 层。
+// 这样做的好处是接口层保持轻薄，后续无论扩 Swagger、调整协议还是接 WebSocket 补偿，都不需要把业务逻辑散落到控制器里。
 import (
 	"ToDoList/server/config"
 	apperrors "ToDoList/server/errors"
@@ -66,9 +69,10 @@ type RemoveMemberReq struct {
 	UserID int `json:"user_id" binding:"required"`
 }
 
-// AddMember
+// AddMember 为任务添加协作成员。
+// 这里要求前端传邮箱而不是 userID，是为了兼容邀请式协作入口，避免调用方先额外查一次用户列表。
 // @Summary 添加任务成员
-// @Description 邀请用户参与任务
+// @Description 邀请一个用户加入任务协作，并授予 editor/viewer 角色
 // @Tags Task
 // @Accept json
 // @Produce json
@@ -103,9 +107,10 @@ func (h *TaskHandler) AddMember(c *gin.Context) {
 	response.Success(c, nil)
 }
 
-// RemoveMember
+// RemoveMember 从任务中移除协作成员。
+// 这个接口保留显式的移除动作，而不是和更新角色复用一个 patch，是为了让审计语义更清晰。
 // @Summary 移除任务成员
-// @Description 移除任务成员
+// @Description 从任务协作成员列表里移除指定用户
 // @Tags Task
 // @Accept json
 // @Produce json
@@ -140,9 +145,10 @@ func (h *TaskHandler) RemoveMember(c *gin.Context) {
 	response.Success(c, nil)
 }
 
-// ListMyTasks
+// ListMyTasks 返回当前用户参与的任务视图。
+// 这里直接支持状态和时间窗筛选，是为了让“我的任务”“未来七天”“日历”等前端视图复用同一条后端查询链路。
 // @Summary 查看我参与的任务
-// @Description 获取当前用户参与的所有任务
+// @Description 获取当前用户参与的任务，并支持状态和截止时间过滤
 // @Tags Task
 // @Accept json
 // @Produce json
@@ -197,9 +203,10 @@ func (h *TaskHandler) ListMyTasks(c *gin.Context) {
 	response.Success(c, res)
 }
 
-// Create
+// Create 创建任务或文档。
+// 文档、会议、轻量待办当前都复用 task 聚合根，因此接口层统一从这里进入，再由 service 根据 doc_type 等字段分流规则。
 // @Summary 创建任务
-// @Description 在指定项目中创建新任务
+// @Description 在指定空间中创建任务或文档
 // @Tags Task
 // @Accept json
 // @Produce json
@@ -238,9 +245,10 @@ func (h *TaskHandler) Create(c *gin.Context) {
 	response.Success(c, task)
 }
 
-// Update
+// Update 更新任务元数据。
+// 这里保留 expected_version 入口，是为了让前端可以把 HTTP 写路径和实时协同里的 CAS 语义对齐，避免静默覆盖。
 // @Summary 更新任务
-// @Description 更新任务详情（标题、内容、状态、优先级等）
+// @Description 更新任务的标题、状态、优先级、截止时间和排序等元数据
 // @Tags Task
 // @Accept json
 // @Produce json
@@ -338,9 +346,101 @@ func (h *TaskHandler) SaveDocumentContent(c *gin.Context) {
 	response.Success(c, task)
 }
 
-// Delete
+// ListTrash
+// @Summary List trashed tasks/documents
+// @Description Returns the current user's soft-deleted tasks/documents.
+// @Tags Trash
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param page query int false "Page"
+// @Param size query int false "Page size"
+// @Success 200 {object} response.Resp{data=response.PageResult} "Loaded"
+// @Router /trash/tasks [get]
+func (h *TaskHandler) ListTrash(c *gin.Context) {
+	lg := utils.CtxLogger(c)
+	start := time.Now()
+	uid := c.GetInt("uid")
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
+
+	result, err := h.svc.ListTrash(c.Request.Context(), lg, uid, service.TrashListInput{
+		Page: page,
+		Size: size,
+	})
+	if err != nil {
+		handleTaskError(c, lg, err, "task.list_trash.failed", start)
+		return
+	}
+
+	response.PageData(c, result.Tasks, result.Total, page, size)
+}
+
+// RestoreFromTrash
+// @Summary Restore task/document from trash
+// @Description Restores a soft-deleted task/document back to its space.
+// @Tags Trash
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Task ID"
+// @Success 200 {object} response.Resp{data=service.TrashRestoreResult} "Restored"
+// @Router /trash/tasks/{id}/restore [post]
+func (h *TaskHandler) RestoreFromTrash(c *gin.Context) {
+	lg := utils.CtxLogger(c)
+	start := time.Now()
+	uid := c.GetInt("uid")
+
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		response.ParamError(c, "invalid task id")
+		return
+	}
+
+	result, err := h.svc.RestoreFromTrash(c.Request.Context(), lg, uid, id)
+	if err != nil {
+		handleTaskError(c, lg, err, "task.restore.failed", start)
+		return
+	}
+
+	response.Success(c, result)
+}
+
+// DeleteFromTrash
+// @Summary Permanently delete task/document from trash
+// @Description Hard-deletes a task/document that is already in trash.
+// @Tags Trash
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Task ID"
+// @Success 200 {object} response.Resp "Deleted"
+// @Router /trash/tasks/{id} [delete]
+func (h *TaskHandler) DeleteFromTrash(c *gin.Context) {
+	lg := utils.CtxLogger(c)
+	start := time.Now()
+	uid := c.GetInt("uid")
+
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		response.ParamError(c, "invalid task id")
+		return
+	}
+
+	_, err = h.svc.DeleteFromTrash(c.Request.Context(), lg, uid, id)
+	if err != nil {
+		handleTaskError(c, lg, err, "task.delete_from_trash.failed", start)
+		return
+	}
+
+	response.SuccessWithMsg(c, "deleted", nil)
+}
+
+// Delete 把任务移入回收站。
+// 当前默认走软删除而不是直接物理删除，是为了给文档型任务保留可恢复入口，同时兼容前端的实时删除事件。
 // @Summary 删除任务
-// @Description 删除指定任务
+// @Description 把指定任务移入回收站
 // @Tags Task
 // @Accept json
 // @Produce json
@@ -370,7 +470,8 @@ func (h *TaskHandler) Delete(c *gin.Context) {
 	response.SuccessWithMsg(c, "删除成功", nil)
 }
 
-// GetDetail
+// GetDetail 返回单个任务详情。
+// 详情接口仍然独立存在，是为了给侧边栏、详情页直达、回收站恢复后回跳等场景提供稳定读取入口。
 // @Summary 查询任务详情
 // @Description 获取单个任务的详细信息
 // @Tags Task
@@ -402,15 +503,16 @@ func (h *TaskHandler) GetDetail(c *gin.Context) {
 	response.Success(c, task)
 }
 
-// List
+// List 返回指定空间下的任务列表。
+// 这里先走缓存链路，再由 service 层决定是否回退数据库，因此 handler 只关心分页参数，不感知缓存细节。
 // @Summary 任务列表
-// @Description 获取指定项目的任务列表
+// @Description 获取指定空间下的任务列表
 // @Tags Task
 // @Accept json
 // @Produce json
 // @Security BearerAuth
 // @Param project_id query int true "项目ID"
-// @Param status query string false "任务状态 (todo/done)"
+// @Param status query string false "任务状态(todo/done)"
 // @Param page query int false "页码"
 // @Param size query int false "每页数量"
 // @Success 200 {object} response.Resp{data=response.PageResult} "获取成功"
@@ -444,9 +546,10 @@ func (h *TaskHandler) List(c *gin.Context) {
 	response.PageData(c, result.Tasks, result.Total, page, size)
 }
 
-// DueCallback
+// DueCallback 处理调度器回调的到期提醒。
+// 这里单独校验调度 token，是为了把内部回调面和普通用户接口隔离开，避免误调用公开 API 触发通知。
 // @Summary 任务到期回调
-// @Description 内部调度器回调接口，用于触发任务到期通知
+// @Description 调度器内部回调接口，用于触发任务到期通知
 // @Tags Internal
 // @Accept json
 // @Produce json
@@ -493,6 +596,8 @@ func (h *TaskHandler) DueCallback(c *gin.Context) {
 	response.SuccessWithMsg(c, "ok", gin.H{"notified": notified})
 }
 
+// handleTaskError 统一把 service 返回的应用错误映射成 HTTP 响应。
+// 这样做的好处是任务域相关接口可以复用同一套错误翻译规则，减少每个 handler 重复写 switch。
 func handleTaskError(c *gin.Context, lg *zap.Logger, err error, logMsg string, start time.Time) {
 	var appErr *apperrors.Error
 	if apperrors.As(err, &appErr) {

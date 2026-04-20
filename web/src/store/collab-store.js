@@ -129,6 +129,8 @@ export function flattenPresenceUsers(presenceByNode) {
             const connections = Number(item.connections) || 0;
             if (existing) {
                 existing.connections += connections;
+                const nextTaskIDs = Array.isArray(item.viewing_task_ids) ? item.viewing_task_ids : [];
+                existing.viewing_task_ids = Array.from(new Set([...(existing.viewing_task_ids || []), ...nextTaskIDs]));
                 if (!existing.username && item.username) {
                     existing.username = item.username;
                 }
@@ -137,6 +139,7 @@ export function flattenPresenceUsers(presenceByNode) {
                     user_id: item.user_id,
                     username: item.username || `User ${item.user_id}`,
                     connections,
+                    viewing_task_ids: Array.isArray(item.viewing_task_ids) ? item.viewing_task_ids : [],
                 });
             }
         });

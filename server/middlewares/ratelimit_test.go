@@ -1,5 +1,9 @@
 package middlewares
 
+// 文件说明：这个文件为对应模块提供测试，重点保护关键边界、并发语义和容易回归的行为。
+// 实现方式：通过 stub、最小集成场景或显式断言覆盖最脆弱的逻辑分支。
+// 这样做的好处是后续重构、补注释或调整实现时，可以快速发现行为回归。
+
 import (
 	"context"
 	"errors"
@@ -36,6 +40,7 @@ func (s *capturingRateLimitStore) firstKey(t *testing.T) string {
 	return s.keys[0]
 }
 
+// TestRateLimitMiddleware_LocalStoreBlocksBurst 验证本地限流器能拦住短时间突发请求。
 func TestRateLimitMiddleware_LocalStoreBlocksBurst(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -58,6 +63,7 @@ func TestRateLimitMiddleware_LocalStoreBlocksBurst(t *testing.T) {
 	}
 }
 
+// TestRateLimitMiddleware_UsesUIDWhenAuthAlreadyRan 验证鉴权已完成时限流 key 会优先使用 uid。
 func TestRateLimitMiddleware_UsesUIDWhenAuthAlreadyRan(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -83,6 +89,7 @@ func TestRateLimitMiddleware_UsesUIDWhenAuthAlreadyRan(t *testing.T) {
 	}
 }
 
+// TestRateLimitMiddleware_AllowsFallbackSuccessWhenStoreReturnsError 验证分布式存储异常时中间件会退回本地兜底而不是直接失败。
 func TestRateLimitMiddleware_AllowsFallbackSuccessWhenStoreReturnsError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -103,6 +110,7 @@ func TestRateLimitMiddleware_AllowsFallbackSuccessWhenStoreReturnsError(t *testi
 	}
 }
 
+// TestParseRedisAllowedRejectsUnknownResult 验证 Redis 返回未知类型时解析会显式报错。
 func TestParseRedisAllowedRejectsUnknownResult(t *testing.T) {
 	if _, err := parseRedisAllowed(struct{}{}); err == nil {
 		t.Fatal("expected error for unexpected redis result type")

@@ -307,6 +307,19 @@
     font-size: 14px;
 }
 
+.yq-panel-section-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    background: var(--color-bg-surface-2);
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+}
+
 .yq-member-form {
     margin-bottom: 10px;
 }
@@ -352,6 +365,146 @@
 .yq-empty-member {
     color: var(--color-text-tertiary);
     font-size: 13px;
+}
+
+.yq-comments-section {
+    margin-top: 16px;
+    display: grid;
+    gap: 12px;
+}
+
+.yq-comment-compose {
+    display: grid;
+    gap: 8px;
+}
+
+.yq-comment-input {
+    min-height: 104px;
+    resize: vertical;
+    padding-top: 10px;
+}
+
+.yq-comment-compose-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.yq-comment-error {
+    border: 1px solid rgba(188, 79, 63, 0.28);
+    border-radius: 10px;
+    background: rgba(188, 79, 63, 0.08);
+    color: #8b3226;
+    padding: 8px 10px;
+    font-size: 13px;
+}
+
+.yq-comment-empty {
+    color: var(--color-text-tertiary);
+    font-size: 13px;
+}
+
+.yq-comment-list {
+    display: grid;
+    gap: 10px;
+}
+
+.yq-comment-item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+}
+
+.yq-comment-card {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-bg-surface-2);
+    padding: 10px 12px;
+}
+
+.yq-comment-item.resolved .yq-comment-card {
+    background: rgba(65, 138, 88, 0.06);
+}
+
+.yq-comment-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+    color: var(--color-text-tertiary);
+    font-size: 12px;
+}
+
+.yq-comment-author-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    color: var(--color-text-primary);
+}
+
+.yq-comment-state {
+    display: inline-flex;
+    align-items: center;
+    min-height: 20px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: rgba(65, 138, 88, 0.12);
+    color: var(--color-success);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.yq-comment-content {
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: transparent;
+}
+
+.yq-comment-anchor {
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    border-left: 3px solid rgba(215, 168, 91, 0.72);
+    background: rgba(215, 168, 91, 0.1);
+    color: var(--color-text-muted);
+    border-radius: 8px;
+    font-size: 0.84rem;
+}
+
+.yq-document-viewers {
+    margin: 10px 0 18px;
+    color: var(--color-text-muted);
+    font-size: 0.86rem;
+}
+
+.yq-comment-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.yq-comment-action {
+    border: none;
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 0;
+}
+
+.yq-comment-action:hover {
+    color: var(--color-text-primary);
+}
+
+.yq-comment-action.danger:hover {
+    color: #8b3226;
 }
 
 .yq-panel-edit-form {

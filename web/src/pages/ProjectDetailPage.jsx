@@ -8,8 +8,9 @@ import {
     uploadDocumentImportPart,
 } from '../api/documentImport';
 import { getProjectById } from '../api/project';
-import { createTask, deleteTask, getTaskById, getTasks, updateTask } from '../api/task';
+import { createTask, deleteTask, getProjectActivities, getTaskById, getTasks, updateTask } from '../api/task';
 import Button from '../components/Button';
+import ProjectActivityPanel from '../components/ProjectActivityPanel';
 import TaskDetailPanel from '../components/TaskDetailPanel';
 import TaskSection from '../components/TaskSection';
 import { projectMessageTypes } from '../realtime/protocol';
@@ -31,6 +32,7 @@ import {
 } from '../store/collab-store';
 import useAuth from '../store/useAuth';
 import { splitTasksByLifecycle } from '../utils/taskExpiration';
+import { isTodoTask, taskDocTypes } from '../utils/taskTypes';
 import './ProjectDetailPage.css';
 
 const documentModes = {
@@ -39,6 +41,7 @@ const documentModes = {
 };
 
 const importChunkSize = 1024 * 1024;
+const activityPageSize = 12;
 
 function isPrivateDocument(task) {
     return task?.collaboration_mode === documentModes.PRIVATE;
@@ -50,6 +53,15 @@ function titleFromMarkdownFile(file) {
 
 function originalAssetPath(file) {
     return file?.webkitRelativePath || file?.name || '';
+}
+
+function mergeActivityEntries(previous, incoming) {
+    const nextMap = new Map();
+    [...previous, ...(incoming || [])].forEach((activity) => {
+        if (!activity?.id) return;
+        nextMap.set(activity.id, activity);
+    });
+    return Array.from(nextMap.values()).sort((left, right) => Number(right.id || 0) - Number(left.id || 0));
 }
 
 export default function ProjectDetailPage() {
@@ -83,7 +95,15 @@ export default function ProjectDetailPage() {
     });
     const [importingMode, setImportingMode] = useState('');
     const [importMessages, setImportMessages] = useState({});
+    const [todoDraftTitle, setTodoDraftTitle] = useState('');
+    const [creatingTodo, setCreatingTodo] = useState(false);
     const [selectedTask, setSelectedTask] = useState(null);
+    const [activities, setActivities] = useState([]);
+    const [activityCursor, setActivityCursor] = useState(0);
+    const [activityHasMore, setActivityHasMore] = useState(false);
+    const [activityLoading, setActivityLoading] = useState(true);
+    const [activityLoadingMore, setActivityLoadingMore] = useState(false);
+    const [activityError, setActivityError] = useState('');
 
     const applyRealtimeEvent = useCallback((event) => {
         setTasks((prev) => applyProjectTaskEvent(prev, event));
@@ -169,6 +189,38 @@ export default function ProjectDetailPage() {
         }
     }, [projectId]);
 
+    const loadActivities = useCallback(async ({ cursor = 0, append = false, silent = false } = {}) => {
+        if (!Number.isFinite(projectId) || projectId <= 0) return;
+
+        if (append) {
+            setActivityLoadingMore(true);
+        } else if (!silent) {
+            setActivityLoading(true);
+        }
+
+        try {
+            const data = await getProjectActivities(projectId, {
+                cursor,
+                limit: activityPageSize,
+            });
+            const nextActivities = Array.isArray(data?.activities) ? data.activities : [];
+            setActivities((prev) => (append ? mergeActivityEntries(prev, nextActivities) : nextActivities));
+            setActivityCursor(Number(data?.next_cursor || 0));
+            setActivityHasMore(Boolean(data?.has_more));
+            setActivityError('');
+        } catch (err) {
+            if (!silent || !append) {
+                setActivityError(err.message || 'Failed to load activity');
+            }
+        } finally {
+            if (append) {
+                setActivityLoadingMore(false);
+            } else if (!silent) {
+                setActivityLoading(false);
+            }
+        }
+    }, [projectId]);
+
     useEffect(() => {
         cursorRef.current = 0;
         setLastCursor(0);
@@ -176,7 +228,16 @@ export default function ProjectDetailPage() {
         setLocksByKey({});
         setLockErrors({});
         loadData();
+        setActivities([]);
+        setActivityCursor(0);
+        setActivityHasMore(false);
+        setActivityError('');
+        setActivityLoading(true);
     }, [loadData]);
+
+    useEffect(() => {
+        loadActivities();
+    }, [loadActivities]);
 
     useEffect(() => {
         if (!project?.id) return undefined;
@@ -202,6 +263,16 @@ export default function ProjectDetailPage() {
             socket.destroy();
         };
     }, [project?.id, applyRealtimeEvent, applyRealtimeEvents, onPresenceSnapshot, onProjectLockMessage, onRealtimeCursor]);
+
+    useEffect(() => {
+        if (!project?.id || lastCursor <= 0) return undefined;
+
+        const timer = window.setTimeout(() => {
+            loadActivities({ silent: true });
+        }, 300);
+
+        return () => window.clearTimeout(timer);
+    }, [project?.id, lastCursor, loadActivities]);
 
     useEffect(() => {
         const rawTaskID = searchParams.get('task');
@@ -245,20 +316,54 @@ export default function ProjectDetailPage() {
         [tasks],
     );
 
+    const attentionDocuments = useMemo(
+        () => expiredTasks.filter((task) => !isTodoTask(task)),
+        [expiredTasks],
+    );
+
+    const attentionTodos = useMemo(
+        () => expiredTasks.filter(isTodoTask),
+        [expiredTasks],
+    );
+
     const collaborativeTasks = useMemo(
-        () => todoTasks.filter((task) => !isPrivateDocument(task)),
+        () => todoTasks.filter((task) => !isPrivateDocument(task) && !isTodoTask(task)),
         [todoTasks],
     );
 
     const privateTasks = useMemo(
-        () => todoTasks.filter(isPrivateDocument),
+        () => todoTasks.filter((task) => isPrivateDocument(task) && !isTodoTask(task)),
         [todoTasks],
+    );
+
+    const todoItems = useMemo(
+        () => todoTasks.filter(isTodoTask),
+        [todoTasks],
+    );
+
+    const archivedDocuments = useMemo(
+        () => doneTasks.filter((task) => !isTodoTask(task)),
+        [doneTasks],
+    );
+
+    const completedTodos = useMemo(
+        () => doneTasks.filter(isTodoTask),
+        [doneTasks],
     );
 
     const onlineUsers = useMemo(
         () => flattenPresenceUsers(presenceByNode),
         [presenceByNode],
     );
+
+    const selectedTaskViewers = useMemo(() => {
+        if (!selectedTask?.id) return [];
+        return onlineUsers.filter((user) => (user.viewing_task_ids || []).includes(selectedTask.id));
+    }, [onlineUsers, selectedTask?.id]);
+
+    useEffect(() => {
+        socketRef.current?.viewDocument(selectedTask?.id || 0);
+    }, [selectedTask?.id]);
 
     const updateDraftTitle = useCallback((mode, value) => {
         setDraftTitles((prev) => ({ ...prev, [mode]: value }));
@@ -282,10 +387,36 @@ export default function ProjectDetailPage() {
             });
             updateDraftTitle(mode, '');
             patchTask(task);
+            loadActivities({ silent: true });
         } catch (err) {
             alert(err.message || 'Failed to create document');
         } finally {
             setCreatingMode('');
+        }
+    };
+
+    const onCreateTodo = async () => {
+        const title = todoDraftTitle.trim();
+        if (!title || creatingTodo) return;
+
+        setCreatingTodo(true);
+        try {
+            const task = await createTask({
+                title,
+                project_id: projectId,
+                doc_type: taskDocTypes.TODO,
+                collaboration_mode: documentModes.COLLABORATIVE,
+                status: 'todo',
+                priority: 0,
+            });
+            setTodoDraftTitle('');
+            patchTask(task);
+            setSelectedTask(task);
+            loadActivities({ silent: true });
+        } catch (err) {
+            alert(err.message || 'Failed to create todo');
+        } finally {
+            setCreatingTodo(false);
         }
     };
 
@@ -346,6 +477,7 @@ export default function ProjectDetailPage() {
             }
             setAssetFilesByMode((prev) => ({ ...prev, [mode]: [] }));
             setImportMessage(mode, `Imported "${result?.task?.title || file.name}".`);
+            loadActivities({ silent: true });
         } catch (err) {
             if (uploadID) {
                 await abortDocumentImport(uploadID).catch(() => undefined);
@@ -354,27 +486,31 @@ export default function ProjectDetailPage() {
         } finally {
             setImportingMode('');
         }
-    }, [assetFilesByMode, importingMode, patchTask, projectId, setImportMessage]);
+    }, [assetFilesByMode, importingMode, loadActivities, patchTask, projectId, setImportMessage]);
 
     const onToggleTask = async (task) => {
         const nextStatus = task.status === 'done' ? 'todo' : 'done';
+        const entityLabel = isTodoTask(task) ? 'todo' : 'document';
         try {
             await updateTask(task.project_id, task.id, { status: nextStatus }, task.version);
             patchTask(optimisticTaskUpdate(task, { status: nextStatus }));
+            loadActivities({ silent: true });
         } catch (err) {
-            alert(err.message || 'Failed to update document');
+            alert(err.message || `Failed to update ${entityLabel}`);
             await loadData();
         }
     };
 
     const onDeleteTask = async (task) => {
-        if (!window.confirm(`Delete document "${task.title}"?`)) return;
+        const entityLabel = isTodoTask(task) ? 'todo' : 'document';
+        if (!window.confirm(`Move ${entityLabel} "${task.title}" to trash?`)) return;
         try {
             await deleteTask(task.id);
             setTasks((prev) => removeTask(prev, task.id));
             setSelectedTask((prev) => (prev?.id === task.id ? null : prev));
+            loadActivities({ silent: true });
         } catch (err) {
-            alert(err.message || 'Failed to delete document');
+            alert(err.message || `Failed to move ${entityLabel} to trash`);
             await loadData();
         }
     };
@@ -382,10 +518,45 @@ export default function ProjectDetailPage() {
     const onPanelTaskUpdated = useCallback(async (task) => {
         if (task?.id) {
             patchTask(task);
+            loadActivities({ silent: true });
             return;
         }
         await loadData();
-    }, [loadData, patchTask]);
+        loadActivities({ silent: true });
+    }, [loadActivities, loadData, patchTask]);
+
+    const onOpenActivityTask = useCallback(async (activity) => {
+        if (activity?.event_type === 'task.deleted' || !Number(activity?.task_id)) return;
+
+        const existing = tasks.find((item) => item.id === activity.task_id);
+        if (existing) {
+            setSelectedTask(existing);
+            return;
+        }
+
+        if (activity?.task?.project_id === projectId) {
+            patchTask(activity.task);
+            setSelectedTask(activity.task);
+            return;
+        }
+
+        try {
+            const loaded = await getTaskById(activity.task_id);
+            if (loaded?.project_id === projectId) {
+                patchTask(loaded);
+                setSelectedTask(loaded);
+            }
+        } catch (err) {
+            alert(err.message || 'Failed to open document');
+        }
+    }, [patchTask, projectId, tasks]);
+
+    const refreshSpace = useCallback(async () => {
+        await Promise.all([
+            loadData(),
+            loadActivities(),
+        ]);
+    }, [loadActivities, loadData]);
 
     const realtimeStatusLabel = {
         [projectConnectionStatus.CONNECTING]: 'Connecting',
@@ -466,6 +637,42 @@ export default function ProjectDetailPage() {
         );
     };
 
+    const renderTodoBlock = () => (
+        <section className="yq-document-block is-todo">
+            <div>
+                <span className="yq-document-block-eyebrow">Todo lane</span>
+                <h2>Lightweight Todos</h2>
+                <p>
+                    Capture action items inside the current space without pulling the main experience away from docs.
+                    These items stay visible in the secondary todo views and can still be discussed in comments.
+                </p>
+            </div>
+
+            <div className="yq-document-block-actions">
+                <input
+                    type="text"
+                    className="yq-document-block-input"
+                    value={todoDraftTitle}
+                    placeholder="Capture a todo title"
+                    onChange={(event) => setTodoDraftTitle(event.target.value)}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            onCreateTodo();
+                        }
+                    }}
+                />
+                <Button onClick={onCreateTodo} disabled={!todoDraftTitle.trim() || creatingTodo}>
+                    {creatingTodo ? 'Creating...' : 'New'}
+                </Button>
+            </div>
+
+            <div className="yq-import-message">
+                Use this for reminders and action items. Collaborative docs and meetings stay in the document blocks.
+            </div>
+        </section>
+    );
+
     if (loading) {
         return <div className="yq-page-container">Loading space...</div>;
     }
@@ -494,7 +701,7 @@ export default function ProjectDetailPage() {
                         Space sync: {realtimeStatusLabel}
                         {lastCursor > 0 ? ` #${lastCursor}` : ''}
                     </span>
-                    <Button variant="secondary" onClick={loadData}>Refresh</Button>
+                    <Button variant="secondary" onClick={refreshSpace}>Refresh</Button>
                 </div>
             </div>
 
@@ -503,17 +710,51 @@ export default function ProjectDetailPage() {
             <div className="yq-document-block-grid">
                 {renderDocumentBlock(documentModes.COLLABORATIVE)}
                 {renderDocumentBlock(documentModes.PRIVATE)}
+                {renderTodoBlock()}
             </div>
 
+            <ProjectActivityPanel
+                activities={activities}
+                loading={activityLoading}
+                loadingMore={activityLoadingMore}
+                error={activityError}
+                hasMore={activityHasMore}
+                onRefresh={() => loadActivities()}
+                onLoadMore={() => loadActivities({ cursor: activityCursor, append: true })}
+                onOpenTask={onOpenActivityTask}
+            />
+
             <TaskSection
-                title="Needs Attention"
-                tasks={expiredTasks}
+                title="Documents Needing Attention"
+                tasks={attentionDocuments}
                 emptyText="No documents need attention."
                 onToggleStatus={onToggleTask}
                 onOpenDetails={setSelectedTask}
                 onDeleteTask={onDeleteTask}
                 locksByKey={locksByKey}
                 currentUserID={currentUserID}
+                completeAriaLabel="Archive document"
+                restoreAriaLabel="Restore document"
+                expiredLabel="Needs attention"
+                dueLabel="Reminder"
+            />
+
+            <TaskSection
+                title="Todos Needing Attention"
+                tasks={attentionTodos}
+                emptyText="No todo reminders are overdue."
+                onToggleStatus={onToggleTask}
+                onOpenDetails={setSelectedTask}
+                onDeleteTask={onDeleteTask}
+                locksByKey={locksByKey}
+                currentUserID={currentUserID}
+                completeLabel="Done"
+                restoreLabel="Undo"
+                detailsLabel="Open"
+                completeAriaLabel="Mark todo as done"
+                restoreAriaLabel="Reopen todo"
+                expiredLabel="Overdue"
+                dueLabel="Reminder"
             />
 
             <TaskSection
@@ -525,6 +766,9 @@ export default function ProjectDetailPage() {
                 onDeleteTask={onDeleteTask}
                 locksByKey={locksByKey}
                 currentUserID={currentUserID}
+                completeAriaLabel="Archive document"
+                restoreAriaLabel="Restore document"
+                dueLabel="Reminder"
             />
 
             <TaskSection
@@ -536,23 +780,66 @@ export default function ProjectDetailPage() {
                 onDeleteTask={onDeleteTask}
                 locksByKey={locksByKey}
                 currentUserID={currentUserID}
+                completeAriaLabel="Archive document"
+                restoreAriaLabel="Restore document"
+                dueLabel="Reminder"
             />
 
             <TaskSection
                 title="Archived Documents"
-                tasks={doneTasks}
+                tasks={archivedDocuments}
                 emptyText="No archived documents."
                 onToggleStatus={onToggleTask}
                 onOpenDetails={setSelectedTask}
                 onDeleteTask={onDeleteTask}
                 locksByKey={locksByKey}
                 currentUserID={currentUserID}
+                completeAriaLabel="Archive document"
+                restoreAriaLabel="Restore document"
+                dueLabel="Reminder"
+            />
+
+            <TaskSection
+                title="Todo Lane"
+                tasks={todoItems}
+                emptyText="No open todos in this space."
+                onToggleStatus={onToggleTask}
+                onOpenDetails={setSelectedTask}
+                onDeleteTask={onDeleteTask}
+                locksByKey={locksByKey}
+                currentUserID={currentUserID}
+                completeLabel="Done"
+                restoreLabel="Undo"
+                detailsLabel="Open"
+                completeAriaLabel="Mark todo as done"
+                restoreAriaLabel="Reopen todo"
+                expiredLabel="Overdue"
+                dueLabel="Reminder"
+            />
+
+            <TaskSection
+                title="Completed Todos"
+                tasks={completedTodos}
+                emptyText="No completed todos yet."
+                onToggleStatus={onToggleTask}
+                onOpenDetails={setSelectedTask}
+                onDeleteTask={onDeleteTask}
+                locksByKey={locksByKey}
+                currentUserID={currentUserID}
+                completeLabel="Done"
+                restoreLabel="Undo"
+                detailsLabel="Open"
+                completeAriaLabel="Mark todo as done"
+                restoreAriaLabel="Reopen todo"
+                expiredLabel="Overdue"
+                dueLabel="Reminder"
             />
 
             <TaskDetailPanel
                 isOpen={Boolean(selectedTask)}
                 onClose={() => setSelectedTask(null)}
                 task={selectedTask}
+                viewers={selectedTaskViewers}
                 project={project}
                 onTaskUpdated={onPanelTaskUpdated}
                 currentUserID={currentUserID}

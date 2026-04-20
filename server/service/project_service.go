@@ -1,6 +1,11 @@
 package service
 
+// 文件说明：这个文件实现空间项目业务，包括创建、查询、列表、更新、删除和缓存维护。
+// 实现方式：服务层组合仓储、项目缓存和用户数据，统一处理项目读写、权限约束以及列表缓存回填。
+// 这样做的好处是空间模型有独立编排层，后续扩展 Spaces 信息架构时不需要把规则散落到 handler 或 repo 中。
+
 import (
+	"ToDoList/server/async"
 	"ToDoList/server/cache"
 	apperrors "ToDoList/server/errors"
 	"ToDoList/server/models"
@@ -21,6 +26,7 @@ type ProjectService struct {
 	projectCache cache.ProjectCache
 	userRepo     repo.UserRepository
 	cacheClient  cache.Cache
+	bus          async.IEventBus
 	sf           singleflight.Group
 }
 
@@ -29,17 +35,75 @@ type ProjectServiceDeps struct {
 	ProjectCache cache.ProjectCache
 	UserRepo     repo.UserRepository
 	CacheClient  cache.Cache
+	Bus          async.IEventBus
 }
 
+// NewProjectService 创建项目服务。
 func NewProjectService(deps ProjectServiceDeps) *ProjectService {
 	return &ProjectService{
 		repo:         deps.Repo,
 		projectCache: deps.ProjectCache,
 		userRepo:     deps.UserRepo,
 		cacheClient:  deps.CacheClient,
+		bus:          deps.Bus,
 	}
 }
 
+func (s *ProjectService) currentProjectSummaryVersion(ctx context.Context, lg *zap.Logger, userID int) int64 {
+	ver, err := s.projectCache.GetSummaryVersion(ctx, userID)
+	if err != nil {
+		lg.Warn("project.summary.get_version_failed", zap.Int("user_id", userID), zap.Error(err))
+		return 0
+	}
+	return ver
+}
+
+func (s *ProjectService) getCachedProjectSummary(ctx context.Context, lg *zap.Logger, userID int, ver int64, name string, page, size int) (*ProjectListResult, bool) {
+	summary, err := s.projectCache.GetSummary(ctx, userID, ver, name, page, size)
+	if err == nil && summary != nil {
+		lg.Info("project.summary.hit_cache", zap.Int("user_id", userID), zap.String("name", name), zap.Int("page", page), zap.Int("size", size))
+		return &ProjectListResult{Projects: summary.Projects, Total: summary.Total}, true
+	}
+	if err != nil && !errors.Is(err, cache.ErrCacheMiss) {
+		lg.Warn("project.summary.get_failed", zap.Int("user_id", userID), zap.String("name", name), zap.Error(err))
+	}
+	return nil, false
+}
+
+func (s *ProjectService) publishProjectSummaryCacheAsync(lg *zap.Logger, userID int, ver int64, name string, page, size int, projects []models.Project, total int64) {
+	if s.bus == nil {
+		return
+	}
+	payload := models.ProjectSummaryCache{
+		Projects: append([]models.Project(nil), projects...),
+		Total:    total,
+		UID:      userID,
+		Ver:      ver,
+		Name:     strings.TrimSpace(name),
+		Page:     page,
+		Size:     size,
+	}
+	async.PublishWithTimeout(s.bus, lg, "PutProjectsSummaryCache", payload, time.Second,
+		zap.Int("user_id", userID),
+		zap.Int64("summary_version", ver),
+		zap.String("name", payload.Name),
+		zap.Int("page", page),
+		zap.Int("size", size),
+	)
+}
+
+func (s *ProjectService) bumpProjectSummaryVersionAsync(lg *zap.Logger, userID int) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if _, err := s.projectCache.BumpSummaryVersion(ctx, userID); err != nil {
+			lg.Warn("project.summary.bump_version_failed", zap.Int("user_id", userID), zap.Error(err))
+		}
+	}()
+}
+
+// rebuildProjectListCacheAsync 异步回填项目详情缓存和项目 ID 列表缓存。
+// 这里把详情缓存和 ZSet 列表分开重建，是为了让列表降级后能尽快恢复到增量读取路径。
 func (s *ProjectService) rebuildProjectListCacheAsync(lg *zap.Logger, userID int, projects []models.Project) {
 	warmProjects := append([]models.Project(nil), projects...)
 
@@ -95,6 +159,8 @@ func (s *ProjectService) rebuildProjectListCacheAsync(lg *zap.Logger, userID int
 	}()
 }
 
+// Create 创建一个新的空间项目。
+// 创建成功后异步写入项目排序集合，是为了让主写路径只关心数据库成功，再把缓存热身放到副作用阶段。
 func (s *ProjectService) Create(ctx context.Context, lg *zap.Logger, userID int, name, color string) (*models.Project, error) {
 	lg = lg.With(zap.Int("user_id", userID), zap.String("name", name))
 	lg.Info("project.create.begin")
@@ -125,6 +191,7 @@ func (s *ProjectService) Create(ctx context.Context, lg *zap.Logger, userID int,
 	}
 
 	lg.Info("project.create.success", zap.Int("project_id", created.ID))
+	s.bumpProjectSummaryVersionAsync(lg, userID)
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -137,6 +204,8 @@ func (s *ProjectService) Create(ctx context.Context, lg *zap.Logger, userID int,
 	return created, nil
 }
 
+// GetByID 读取单个项目详情。
+// 这里对不存在和无权限都统一返回 not found，是为了避免通过接口探测他人项目是否存在。
 func (s *ProjectService) GetByID(ctx context.Context, lg *zap.Logger, userID, projectID int) (*models.Project, error) {
 	lg = lg.With(zap.Int("user_id", userID), zap.Int("project_id", projectID))
 
@@ -210,6 +279,13 @@ type ProjectListResult struct {
 	Total    int64
 }
 
+type SpaceTrashListInput struct {
+	Page int
+	Size int
+}
+
+// List 返回项目列表或搜索结果。
+// 无搜索词时优先走缓存列表链路，有搜索词时直接查库，是因为模糊搜索结果难以稳定缓存，而普通列表读取频次更高。
 func (s *ProjectService) List(ctx context.Context, lg *zap.Logger, userID int, in ProjectListInput) (*ProjectListResult, error) {
 	lg = lg.With(zap.Int("user_id", userID))
 
@@ -221,8 +297,10 @@ func (s *ProjectService) List(ctx context.Context, lg *zap.Logger, userID int, i
 	if size <= 0 || size > 100 {
 		size = 20
 	}
+	name := strings.TrimSpace(in.Name)
+	summaryVersion := s.currentProjectSummaryVersion(ctx, lg, userID)
 
-	if in.Name == "" {
+	if name == "" {
 		ids, err := s.projectCache.GetProjectIDs(ctx, userID, page, size)
 		if err != nil {
 			if errors.Is(err, cache.ErrCacheMiss) {
@@ -330,15 +408,22 @@ func (s *ProjectService) List(ctx context.Context, lg *zap.Logger, userID int, i
 			return &ProjectListResult{Projects: []models.Project{}, Total: total}, nil
 		}
 	} else {
-		projects, total, err := s.repo.Search(ctx, userID, strings.TrimSpace(in.Name), page, size)
+		if result, ok := s.getCachedProjectSummary(ctx, lg, userID, summaryVersion, name, page, size); ok {
+			return result, nil
+		}
+		projects, total, err := s.repo.Search(ctx, userID, name, page, size)
 		if err != nil {
 			lg.Error("project.search.failed", zap.Error(err))
 			return nil, apperrors.NewInternalError("系统错误")
 		}
+		s.publishProjectSummaryCacheAsync(lg, userID, summaryVersion, name, page, size, projects, total)
 		return &ProjectListResult{Projects: projects, Total: total}, nil
 	}
 
 DB_FALLBACK:
+	if result, ok := s.getCachedProjectSummary(ctx, lg, userID, summaryVersion, name, page, size); ok {
+		return result, nil
+	}
 	lg.Info("project.list.fallback_db")
 	projects, total, err := s.repo.List(ctx, userID, page, size)
 	if err != nil {
@@ -348,6 +433,7 @@ DB_FALLBACK:
 	if repairCache {
 		s.rebuildProjectListCacheAsync(lg, userID, projects)
 	}
+	s.publishProjectSummaryCacheAsync(lg, userID, summaryVersion, name, page, size, projects, total)
 	return &ProjectListResult{Projects: projects, Total: total}, nil
 }
 
@@ -357,6 +443,8 @@ type UpdateProjectInput struct {
 	SortOrder *int64
 }
 
+// Update 更新项目名称、颜色和排序。
+// 排序字段单独支持增量更新，是为了兼容前端拖拽排序，不必每次都重写整条项目记录。
 func (s *ProjectService) Update(ctx context.Context, lg *zap.Logger, userID, projectID int, in UpdateProjectInput) (*models.Project, error, int64) {
 	lg = lg.With(zap.Int("user_id", userID), zap.Int("project_id", projectID))
 
@@ -400,6 +488,7 @@ func (s *ProjectService) Update(ctx context.Context, lg *zap.Logger, userID, pro
 	}
 
 	s.projectCache.Del(ctx, userID, projectID)
+	s.bumpProjectSummaryVersionAsync(lg, userID)
 
 	if in.SortOrder != nil {
 		go func() {
@@ -415,6 +504,8 @@ func (s *ProjectService) Update(ctx context.Context, lg *zap.Logger, userID, pro
 	return updatedProject, nil, affected
 }
 
+// Delete 把空间移入回收站。
+// 删除完成后同时清理详情缓存和项目 ID 集合，是为了避免前端列表短时间内看到已经消失的空间。
 func (s *ProjectService) Delete(ctx context.Context, lg *zap.Logger, userID, projectID int) (int64, error) {
 	lg = lg.With(zap.Int("user_id", userID), zap.Int("project_id", projectID))
 
@@ -430,7 +521,8 @@ func (s *ProjectService) Delete(ctx context.Context, lg *zap.Logger, userID, pro
 		return 0, apperrors.NewForbiddenError("只有项目所有者可以删除项目")
 	}
 
-	projAffected, taskAffected, err := s.repo.DeleteWithTasks(ctx, projectID, userID)
+	deletedAt := time.Now()
+	affected, err := s.repo.SoftDeleteByID(ctx, projectID, userID, userID, deletedAt, buildTrashedProjectName(project.Name, projectID, deletedAt), project.Name)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return 0, apperrors.NewNotFoundError("项目不存在")
@@ -440,6 +532,7 @@ func (s *ProjectService) Delete(ctx context.Context, lg *zap.Logger, userID, pro
 	}
 
 	s.projectCache.Del(ctx, userID, projectID)
+	s.bumpProjectSummaryVersionAsync(lg, userID)
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -449,6 +542,106 @@ func (s *ProjectService) Delete(ctx context.Context, lg *zap.Logger, userID, pro
 		}
 	}()
 
-	lg.Info("project.delete.success", zap.Int64("project_affected", projAffected), zap.Int64("task_affected", taskAffected))
-	return projAffected, nil
+	lg.Info("project.delete.success", zap.Int64("project_affected", affected))
+	return affected, nil
+}
+
+func (s *ProjectService) ListTrash(ctx context.Context, lg *zap.Logger, userID int, in SpaceTrashListInput) (*ProjectListResult, error) {
+	page, size := in.Page, in.Size
+	if page < 1 {
+		page = 1
+	}
+	if size <= 0 || size > 100 {
+		size = 20
+	}
+
+	projects, total, err := s.repo.ListDeletedByUser(ctx, userID, page, size)
+	if err != nil {
+		lg.Error("project.list_trash.failed", zap.Int("user_id", userID), zap.Error(err))
+		return nil, apperrors.NewInternalError("failed to load trashed spaces")
+	}
+	return &ProjectListResult{Projects: projects, Total: total}, nil
+}
+
+func (s *ProjectService) RestoreFromTrash(ctx context.Context, lg *zap.Logger, userID, projectID int) (*models.Project, error) {
+	project, err := s.repo.GetDeletedByIDAndUser(ctx, projectID, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperrors.NewNotFoundError("space not found in trash")
+		}
+		return nil, apperrors.NewInternalError("failed to query trashed space")
+	}
+
+	restoreName := strings.TrimSpace(project.DeletedName)
+	if restoreName == "" {
+		restoreName = strings.TrimSpace(project.Name)
+	}
+	if restoreName == "" {
+		return nil, apperrors.NewConflictError("space name is missing")
+	}
+
+	existing, err := s.repo.GetByUserName(ctx, userID, restoreName)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, apperrors.NewInternalError("failed to restore space")
+	}
+	if existing != nil && existing.ID != 0 {
+		return nil, apperrors.NewConflictError("a space with the same name already exists")
+	}
+
+	affected, err := s.repo.RestoreByID(ctx, projectID, userID, restoreName)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperrors.NewNotFoundError("space not found in trash")
+		}
+		if strings.Contains(err.Error(), "Duplicate") || strings.Contains(err.Error(), "1062") {
+			return nil, apperrors.NewConflictError("a space with the same name already exists")
+		}
+		return nil, apperrors.NewInternalError("failed to restore space")
+	}
+	if affected == 0 {
+		return nil, apperrors.NewConflictError("space restore conflict")
+	}
+
+	restored, err := s.repo.GetByIDAndUserID(ctx, projectID, userID)
+	if err != nil {
+		return nil, apperrors.NewInternalError("failed to load restored space")
+	}
+
+	s.projectCache.Del(ctx, userID, projectID)
+	s.bumpProjectSummaryVersionAsync(lg, userID)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = s.projectCache.AddProjectID(ctx, userID, restored.ID, float64(restored.SortOrder))
+	}()
+
+	return restored, nil
+}
+
+func (s *ProjectService) DeleteFromTrash(ctx context.Context, lg *zap.Logger, userID, projectID int) (int64, error) {
+	if _, err := s.repo.GetDeletedByIDAndUser(ctx, projectID, userID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, apperrors.NewNotFoundError("space not found in trash")
+		}
+		return 0, apperrors.NewInternalError("failed to query trashed space")
+	}
+
+	affected, _, err := s.repo.DeleteWithTasks(ctx, projectID, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, apperrors.NewNotFoundError("space not found in trash")
+		}
+		return 0, apperrors.NewInternalError("failed to permanently delete space")
+	}
+	s.projectCache.Del(ctx, userID, projectID)
+	s.bumpProjectSummaryVersionAsync(lg, userID)
+	return affected, nil
+}
+
+func buildTrashedProjectName(name string, id int, deletedAt time.Time) string {
+	base := strings.TrimSpace(name)
+	if base == "" {
+		base = fmt.Sprintf("space-%d", id)
+	}
+	return fmt.Sprintf("%s [trashed-%d-%d]", base, id, deletedAt.Unix())
 }

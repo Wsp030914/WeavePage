@@ -1,4 +1,8 @@
-package main
+﻿package main
+
+// 文件说明：这个文件是后端服务入口，负责组装配置、数据库、缓存、异步总线、实时协同与 HTTP 服务。
+// 实现方式：在启动阶段一次性完成依赖初始化与服务装配，再把运行时职责交给各层组件协作。
+// 这样做的好处是启动路径集中、依赖关系清晰，便于排查环境问题和扩展新组件。
 
 import (
 	"ToDoList/server/async"
@@ -57,6 +61,7 @@ func main() {
 	taskRepo := repo.NewTaskRepository(db)
 	taskEventRepo := repo.NewTaskEventRepository(db)
 	taskContentRepo := repo.NewTaskContentRepository(db)
+	taskCommentRepo := repo.NewTaskCommentRepository(db)
 	taskMemberRepo := repo.NewTaskMemberRepository(db)
 
 	redisCache := cache.NewRedisCache(rdb)
@@ -115,6 +120,7 @@ func main() {
 		ProjectCache: projectCache,
 		UserRepo:     userRepo,
 		CacheClient:  redisCache,
+		Bus:          bus,
 	})
 
 	taskSvc := service.NewTaskService(service.TaskServiceDeps{
@@ -132,6 +138,10 @@ func main() {
 		CacheClient:            redisCache,
 		Bus:                    bus,
 	})
+	taskCommentSvc := service.NewTaskCommentService(service.TaskCommentServiceDeps{
+		Repo:        taskCommentRepo,
+		TaskSession: taskSvc,
+	})
 
 	authSvc := service.NewAuthService(service.AuthServiceDeps{
 		Repo:      userRepo,
@@ -148,6 +158,10 @@ func main() {
 		Cache:       redisCache,
 		Store:       utils.NewCOSObjectStore(),
 	})
+	aiSvc, err := service.NewAIService(ctx, cfg.AI)
+	if err != nil {
+		log.Fatalf("Failed to initialize AI service: %v", err)
+	}
 
 	app := &App{
 		Bus:               bus,
@@ -156,6 +170,7 @@ func main() {
 		ProjectHub:        projectHub,
 		ContentHub:        contentHub,
 		DocumentImportSvc: documentImportSvc,
+		AIService:         aiSvc,
 	}
 
 	logger := config.InitZap(&cfg.Zap)
@@ -165,7 +180,7 @@ func main() {
 	projectHub.Start(ctx, logger)
 	contentHub.Start(ctx, logger)
 
-	r := NewRouter(ctx, app, userSvc, projectSvc, taskSvc, authSvc)
+	r := NewRouter(ctx, app, userSvc, projectSvc, taskSvc, taskCommentSvc, authSvc)
 	defer func() {
 		_ = zap.L().Sync()
 	}()

@@ -18,6 +18,7 @@ import (
 type cosDeletePayload struct {
 	Key string `json:"key"`
 }
+
 type avatarKeyPut struct {
 	UID       int    `json:"uid"`
 	AvatarKey string `json:"avatarKey"`
@@ -77,7 +78,6 @@ func UpdateAvatarKey(ctx context.Context, job async.KafkaJob, lg *zap.Logger) er
 		avatarURL = utils.ObjectURLFromKey(avatarKey)
 	}
 
-	// If profile is cached, patch avatar_url in place.
 	if globalDeps.UserCache != nil {
 		profile, err := globalDeps.UserCache.GetProfile(ctx, a.UID)
 		switch {
@@ -95,7 +95,6 @@ func UpdateAvatarKey(ctx context.Context, job async.KafkaJob, lg *zap.Logger) er
 		}
 	}
 
-	// Also cache raw avatar key for lightweight reads/debug.
 	if globalDeps.Cache != nil {
 		if err := globalDeps.Cache.Set(ctx, avatarKeyCacheKey(a.UID), avatarKey, 24*time.Hour); err != nil {
 			lg.Error(job.Type+" set avatar key cache failed", zap.Int("uid", a.UID), zap.Error(err))

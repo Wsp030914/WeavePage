@@ -1,11 +1,15 @@
-package realtime
+﻿package realtime
 
+// 文件说明：这个文件实现正文协同实时 hub。
+// 实现方式：管理任务级连接房间、消息广播、Redis fan-out 与快照初始化。
+// 这样做的好处是正文实时协同能够跨节点传播，同时保持单任务粒度隔离。
 import (
 	"ToDoList/server/models"
 	"ToDoList/server/service"
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -25,9 +29,10 @@ const (
 )
 
 type ContentHub struct {
-	svc    *service.TaskService
-	rdb    *redis.Client
-	nodeID string
+	svc     *service.TaskService
+	rdb     *redis.Client
+	nodeID  string
+	metrics realtimeCounters
 
 	mu    sync.RWMutex
 	rooms map[int]map[*contentClient]struct{}
@@ -43,7 +48,8 @@ type contentClient struct {
 	closed  bool
 }
 
-// NewContentHub creates a task body collaboration hub.
+// NewContentHub 创建正文协同 hub。
+// 这里按 task 维度建房间，是因为正文协同的广播粒度天然就是单文档。
 func NewContentHub(svc *service.TaskService, rdb *redis.Client, nodeID string) *ContentHub {
 	return &ContentHub{
 		svc:    svc,
@@ -53,7 +59,8 @@ func NewContentHub(svc *service.TaskService, rdb *redis.Client, nodeID string) *
 	}
 }
 
-// Start subscribes to Redis fan-out messages until ctx is canceled.
+// Start 在当前节点启动 Redis fan-out 订阅。
+// 这样做的好处是某个实例收到的正文消息可以继续广播到其他实例上的同任务连接。
 func (h *ContentHub) Start(ctx context.Context, lg *zap.Logger) {
 	if h == nil || h.rdb == nil {
 		return
@@ -62,7 +69,8 @@ func (h *ContentHub) Start(ctx context.Context, lg *zap.Logger) {
 	go h.runPubSub(ctx, lg)
 }
 
-// HandleConnection registers a WebSocket connection into a task content room.
+// HandleConnection 把一个 WebSocket 连接接入正文房间，并启动读写循环。
+// 初始同步会先把游标之后的更新补给客户端，避免断线重连时丢正文增量。
 func (h *ContentHub) HandleConnection(ctx context.Context, conn *websocket.Conn, session service.TaskContentSession, initialCursor int64, lg *zap.Logger) {
 	client := &contentClient{
 		hub:     h,
@@ -90,6 +98,7 @@ func (h *ContentHub) register(client *contentClient) {
 		h.rooms[client.session.TaskID] = room
 	}
 	room[client] = struct{}{}
+	h.metrics.connectionsAccepted.Add(1)
 }
 
 func (h *ContentHub) unregister(client *contentClient) {
@@ -108,13 +117,56 @@ func (h *ContentHub) unregister(client *contentClient) {
 	if !client.closed {
 		client.closed = true
 		close(client.send)
+		h.metrics.connectionsClosed.Add(1)
 	}
 }
 
+func (h *ContentHub) MetricsSnapshot() HubMetrics {
+	if h == nil {
+		return HubMetrics{Hub: "content"}
+	}
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	rooms := make([]RoomMetrics, 0, len(h.rooms))
+	totalConnections := 0
+	globalUsers := make(map[int]struct{})
+	for taskID, room := range h.rooms {
+		roomUsers := make(map[int]struct{})
+		for client := range room {
+			totalConnections++
+			roomUsers[client.session.UserID] = struct{}{}
+			globalUsers[client.session.UserID] = struct{}{}
+		}
+		rooms = append(rooms, RoomMetrics{
+			ID:          taskID,
+			Connections: len(room),
+			Users:       len(roomUsers),
+		})
+	}
+	sort.Slice(rooms, func(i, j int) bool {
+		return rooms[i].ID < rooms[j].ID
+	})
+
+	return HubMetrics{
+		NodeID:            h.nodeID,
+		Hub:               "content",
+		ActiveRooms:       len(h.rooms),
+		ActiveConnections: totalConnections,
+		ActiveUsers:       len(globalUsers),
+		Rooms:             rooms,
+		Counters:          h.metrics.snapshot(),
+	}
+}
+
+// broadcast 只向同一个 task 房间里的连接广播正文消息。
+// exclude 用来避免把某个客户端刚提交的 update 原样再回推给自己。
 func (h *ContentHub) broadcast(taskID int, msg ContentServerMessage, exclude *contentClient) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	h.metrics.broadcastMessages.Add(1)
 	for client := range h.rooms[taskID] {
 		if client == exclude {
 			continue
@@ -122,11 +174,14 @@ func (h *ContentHub) broadcast(taskID int, msg ContentServerMessage, exclude *co
 		select {
 		case client.send <- msg:
 		default:
+			h.metrics.droppedClients.Add(1)
 			go h.unregister(client)
 		}
 	}
 }
 
+// publish 把当前节点收到的正文消息投递到 Redis Pub/Sub。
+// 这样其他节点也能收到同一条正文更新，保证多实例部署下的协同一致性。
 func (h *ContentHub) publish(ctx context.Context, taskID int, msg ContentServerMessage, lg *zap.Logger) {
 	if h.rdb == nil {
 		return
@@ -142,10 +197,14 @@ func (h *ContentHub) publish(ctx context.Context, taskID int, msg ContentServerM
 		return
 	}
 	if err := h.rdb.Publish(ctx, contentPubSubChannel, payload).Err(); err != nil {
+		h.metrics.pubSubPublishErrors.Add(1)
 		lg.Warn("content.pubsub.publish_failed", zap.Int("task_id", taskID), zap.Error(err))
+		return
 	}
+	h.metrics.pubSubPublished.Add(1)
 }
 
+// runPubSub 持续消费来自 Redis 的正文广播，并转发给本节点的本地连接。
 func (h *ContentHub) runPubSub(ctx context.Context, lg *zap.Logger) {
 	pubsub := h.rdb.Subscribe(ctx, contentPubSubChannel)
 	defer pubsub.Close()
@@ -167,11 +226,13 @@ func (h *ContentHub) runPubSub(ctx context.Context, lg *zap.Logger) {
 			if env.OriginNodeID == h.nodeID {
 				continue
 			}
+			h.metrics.pubSubReceived.Add(1)
 			h.broadcast(env.TaskID, env.Message, nil)
 		}
 	}
 }
 
+// readPump 持续消费客户端消息，并在连接异常关闭时退出。
 func (c *contentClient) readPump(ctx context.Context) {
 	defer c.conn.Close()
 
@@ -193,6 +254,7 @@ func (c *contentClient) readPump(ctx context.Context) {
 	}
 }
 
+// writePump 负责异步写回正文消息和定期发送 ping 保活。
 func (c *contentClient) writePump() {
 	ticker := time.NewTicker(contentPingPeriod)
 	defer func() {
@@ -237,6 +299,7 @@ func (c *contentClient) handleMessage(ctx context.Context, msg ContentClientMess
 	}
 }
 
+// sendSync 通过 service 层按游标拉取正文 update log，再把结果封装成协议消息发回客户端。
 func (c *contentClient) sendSync(ctx context.Context, cursor int64) {
 	result, err := c.hub.svc.SyncTaskContentUpdates(ctx, c.lg, c.session, service.TaskContentSyncInput{
 		Cursor: cursor,
@@ -282,8 +345,10 @@ func (c *contentClient) handleUpdate(ctx context.Context, msg ContentClientMessa
 	c.enqueue(ack)
 
 	if result.Duplicate {
+		c.hub.metrics.duplicateUpdates.Add(1)
 		return
 	}
+	c.hub.metrics.contentUpdates.Add(1)
 
 	updateMsg := ContentServerMessage{
 		Type:         ContentMessageTypeUpdate,

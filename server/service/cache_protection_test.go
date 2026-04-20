@@ -1,5 +1,9 @@
 package service
 
+// 文件说明：这个文件为对应模块提供测试，重点保护关键边界、并发语义和容易回归的行为。
+// 实现方式：通过 stub、最小集成场景或显式断言覆盖最脆弱的逻辑分支。
+// 这样做的好处是后续重构、补注释或调整实现时，可以快速发现行为回归。
+
 import (
 	"context"
 	"sync/atomic"
@@ -8,6 +12,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// TestLoadWithCacheProtection_AcquiredLockLoadsAndReleases 验证拿到保护锁时会执行加载并在结束后释放锁。
 func TestLoadWithCacheProtection_AcquiredLockLoadsAndReleases(t *testing.T) {
 	t.Parallel()
 
@@ -46,6 +51,7 @@ func TestLoadWithCacheProtection_AcquiredLockLoadsAndReleases(t *testing.T) {
 	}
 }
 
+// TestLoadWithCacheProtection_WaitsForCacheWhenLockHeld 验证拿不到锁时会等待缓存回填，而不是直接重复回源。
 func TestLoadWithCacheProtection_WaitsForCacheWhenLockHeld(t *testing.T) {
 	t.Parallel()
 

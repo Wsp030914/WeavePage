@@ -102,45 +102,46 @@ export default function AppLayout() {
                     <Avatar src={user.avatar_url} alt={user.username} size={38} />
                     <div className="yq-sidebar-user-meta">
                         <strong>{user.username}</strong>
-                        <span>Personal Workspace</span>
+                        <span>Knowledge workspace</span>
                     </div>
                 </div>
 
                 <div className="yq-sidebar-section yq-primary-nav">
-                    <MainNavItem to="/" label="空间" active={location.pathname === '/'} />
+                    <MainNavItem to="/" label="Spaces" active={location.pathname === '/'} />
                     <MainNavItem
-                        label="日记"
+                        label="Daily Notes"
                         active={Boolean(diaryPath && location.pathname === diaryPath)}
-                        meta={openingDiary ? '打开中' : '今天'}
+                        meta={openingDiary ? 'Opening' : 'Today'}
                         onClick={onOpenTodayDiary}
                         busy={openingDiary}
                     />
                     <MainNavItem
-                        label="会议"
+                        label="Meetings"
                         active={Boolean(meetingPath && location.pathname === meetingPath)}
-                        meta={creatingMeeting ? '创建中' : '新建'}
+                        meta={creatingMeeting ? 'Creating' : 'New'}
                         onClick={onCreateMeeting}
                         busy={creatingMeeting}
                     />
-                    <MainNavItem disabled label="搜索" meta="规划中" />
+                    <MainNavItem to="/search" label="Search" active={location.pathname === '/search'} />
                     {diaryError ? <div className="yq-sidebar-inline-error">{diaryError}</div> : null}
                     {meetingError ? <div className="yq-sidebar-inline-error">{meetingError}</div> : null}
                 </div>
 
                 <div className="yq-sidebar-section">
                     <div className="yq-list-header">
-                        <span>待办</span>
+                        <span>Todos</span>
                     </div>
-                    <MainNavItem to="/tasks/me" label="今日" active={location.pathname === '/tasks/me'} />
-                    <MainNavItem to="/tasks/next7" label="未来 7 天" active={location.pathname === '/tasks/next7'} />
-                    <MainNavItem to="/calendar" label="日历" active={location.pathname === '/calendar'} />
-                    <MainNavItem to={inboxPath} label="收件箱" active={inboxProject ? location.pathname === inboxPath : false} />
+                    <MainNavItem to="/tasks/me" label="Today" active={location.pathname === '/tasks/me'} />
+                    <MainNavItem to="/tasks/next7" label="Next 7 Days" active={location.pathname === '/tasks/next7'} />
+                    <MainNavItem to="/calendar" label="Calendar" active={location.pathname === '/calendar'} />
+                    <MainNavItem to="/trash" label="Trash" active={location.pathname === '/trash'} />
+                    <MainNavItem to={inboxPath} label="Inbox" active={inboxProject ? location.pathname === inboxPath : false} />
                 </div>
 
                 <div className="yq-sidebar-section yq-list-section">
                     <div className="yq-list-header">
-                        <span>空间列表</span>
-                        <Button variant="secondary" className="yq-mini-btn" onClick={() => navigate('/')}>管理</Button>
+                        <span>Spaces</span>
+                        <Button variant="secondary" className="yq-mini-btn" onClick={() => navigate('/')}>Manage</Button>
                     </div>
                     <div className="yq-project-links">
                         {projects.map((project) => {
@@ -157,8 +158,8 @@ export default function AppLayout() {
                 </div>
 
                 <div className="yq-sidebar-footer">
-                    <Button variant="secondary" onClick={() => navigate('/profile')}>个人资料</Button>
-                    <Button variant="danger" onClick={onLogout}>退出</Button>
+                    <Button variant="secondary" onClick={() => navigate('/profile')}>Profile</Button>
+                    <Button variant="danger" onClick={onLogout}>Log out</Button>
                 </div>
             </aside>
 

@@ -9,12 +9,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// DiaryHandler handles product-semantic daily note endpoints.
 type DiaryHandler struct {
 	svc *service.TaskService
 }
 
-// NewDiaryHandler creates a diary handler.
 func NewDiaryHandler(svc *service.TaskService) *DiaryHandler {
 	return &DiaryHandler{svc: svc}
 }
@@ -41,5 +39,28 @@ func (h *DiaryHandler) Today(c *gin.Context) {
 		return
 	}
 
+	response.Success(c, result)
+}
+
+// OpenDate
+// @Summary 打开或创建指定日期日记
+// @Description 查找或创建当前用户指定日期 YYYY-MM-DD.md 私人文档。
+// @Tags Diary
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param date path string true "YYYY-MM-DD"
+// @Success 200 {object} response.Resp{data=service.DiaryTodayResult} "打开成功"
+// @Router /diary/{date} [post]
+func (h *DiaryHandler) OpenDate(c *gin.Context) {
+	lg := utils.CtxLogger(c)
+	start := time.Now()
+	uid := c.GetInt("uid")
+
+	result, err := h.svc.OpenDiaryByDate(c.Request.Context(), lg, uid, c.Param("date"))
+	if err != nil {
+		handleTaskError(c, lg, err, "diary.open_date.failed", start)
+		return
+	}
 	response.Success(c, result)
 }

@@ -1,5 +1,9 @@
 package async
 
+// 文件说明：这个文件实现 Kafka 生产端封装。
+// 实现方式：把业务 payload 包装成统一的 KafkaMessage，并附带 trace_id、创建时间和重试计数。
+// 这样做的好处是消费侧可以围绕固定消息外壳做解析、重试和 DLQ 处理。
+
 import (
 	"context"
 	"encoding/json"
@@ -26,6 +30,7 @@ type KafkaMessage struct {
 	Retry     int             `json:"retry"`
 }
 
+// NewKafkaProducer 创建 Kafka producer。
 func NewKafkaProducer(brokers []string, topic string) *KafkaProducer {
 	lg := zap.L()
 
@@ -46,6 +51,8 @@ func NewKafkaProducer(brokers []string, topic string) *KafkaProducer {
 	}
 }
 
+// Publish 发布一条标准异步事件消息。
+// 统一封装消息外壳，是为了让生产侧和消费侧共享同一份可观测字段。
 func (p *KafkaProducer) Publish(ctx context.Context, jobType string, payload any, traceID string) error {
 	p.mu.RLock()
 	if p.closed {
@@ -104,6 +111,8 @@ func (p *KafkaProducer) Publish(ctx context.Context, jobType string, payload any
 	return nil
 }
 
+// PublishToDLQ 把失败消息写入死信队列。
+// DLQ 消息里带上原始 topic、错误原因和重试次数，是为了方便后续排障和人工补偿。
 func (p *KafkaProducer) PublishToDLQ(ctx context.Context, dlqTopic string, originalTopic string, msg KafkaMessage, cause error) error {
 	msg.Retry++
 
@@ -159,6 +168,7 @@ func (p *KafkaProducer) PublishToDLQ(ctx context.Context, dlqTopic string, origi
 	return nil
 }
 
+// Close 关闭 Kafka producer。
 func (p *KafkaProducer) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -14,6 +14,7 @@ import {
 import { splitTasksByLifecycle } from '../utils/taskExpiration';
 import { filterTasksByDueRange } from '../utils/taskDueRange';
 import { endOfShanghaiDay, startOfShanghaiDay } from '../utils/shanghaiTime';
+import { isTodoTask } from '../utils/taskTypes';
 import './ProjectDetailPage.css';
 
 function getTodayRange() {
@@ -37,11 +38,11 @@ export default function MyTasksPage() {
         try {
             const { start, end } = getTodayRange();
             const allTasks = await getTasksAcrossProjects(projects.map((project) => project.id), 100);
-            const list = filterTasksByDueRange(allTasks, start, end);
+            const list = filterTasksByDueRange(allTasks.filter(isTodoTask), start, end);
             setTasks(list);
             setError('');
         } catch (err) {
-            setError(err.message || 'Failed to load tasks');
+            setError(err.message || 'Failed to load todos');
         } finally {
             setLoading(false);
         }
@@ -53,7 +54,7 @@ export default function MyTasksPage() {
 
     const isTaskVisible = useCallback((task) => {
         const { start, end } = getTodayRange();
-        return filterTasksByDueRange([task], start, end).length > 0;
+        return isTodoTask(task) && filterTasksByDueRange([task], start, end).length > 0;
     }, []);
 
     const patchTask = useCallback((task) => {
@@ -73,19 +74,19 @@ export default function MyTasksPage() {
             const updatedTask = await updateTask(task.project_id, task.id, { status: nextStatus }, task.version);
             patchTask(updatedTask || optimisticTaskUpdate(task, { status: nextStatus }));
         } catch (err) {
-            alert(err.message || 'Failed to update task');
+            alert(err.message || 'Failed to update todo');
             await loadTasks();
         }
     };
 
     const onDeleteTask = async (task) => {
-        if (!window.confirm(`Delete task "${task.title}"?`)) return;
+        if (!window.confirm(`Move todo "${task.title}" to trash?`)) return;
         try {
             await deleteTask(task.id);
             setTasks((prev) => removeTask(prev, task.id));
             setSelectedTask((prev) => (prev?.id === task.id ? null : prev));
         } catch (err) {
-            alert(err.message || 'Failed to delete task');
+            alert(err.message || 'Failed to move todo to trash');
             await loadTasks();
         }
     };
@@ -114,7 +115,7 @@ export default function MyTasksPage() {
             <div className="yq-page-header yq-board-header">
                 <div>
                     <span className="yq-kicker">Todos</span>
-                    <h1>今日待办</h1>
+                    <h1>Today</h1>
                 </div>
                 <div className="yq-board-tools">
                     <Button variant="secondary" onClick={loadTasks}>Refresh</Button>
@@ -122,9 +123,9 @@ export default function MyTasksPage() {
             </div>
 
             <TaskSection
-                title="Expired"
+                title="Overdue"
                 tasks={expiredTasks}
-                emptyText="No expired tasks today."
+                emptyText="No overdue todos today."
                 onToggleStatus={onToggleTask}
                 onOpenDetails={setSelectedTask}
                 onDeleteTask={onDeleteTask}
@@ -132,13 +133,17 @@ export default function MyTasksPage() {
                 completeLabel="Done"
                 restoreLabel="Undo"
                 projectLabel="Space"
-                detailsLabel="Details"
+                detailsLabel="Open"
+                completeAriaLabel="Mark todo as done"
+                restoreAriaLabel="Reopen todo"
+                expiredLabel="Overdue"
+                dueLabel="Reminder"
             />
 
             <TaskSection
                 title="Open"
                 tasks={todoTasks}
-                emptyText="No due tasks today."
+                emptyText="No active todos due today."
                 onToggleStatus={onToggleTask}
                 onOpenDetails={setSelectedTask}
                 onDeleteTask={onDeleteTask}
@@ -146,13 +151,17 @@ export default function MyTasksPage() {
                 completeLabel="Done"
                 restoreLabel="Undo"
                 projectLabel="Space"
-                detailsLabel="Details"
+                detailsLabel="Open"
+                completeAriaLabel="Mark todo as done"
+                restoreAriaLabel="Reopen todo"
+                expiredLabel="Overdue"
+                dueLabel="Reminder"
             />
 
             <TaskSection
                 title="Completed"
                 tasks={doneTasks}
-                emptyText="No completed tasks today."
+                emptyText="No completed todos today."
                 onToggleStatus={onToggleTask}
                 onOpenDetails={setSelectedTask}
                 onDeleteTask={onDeleteTask}
@@ -160,7 +169,11 @@ export default function MyTasksPage() {
                 completeLabel="Done"
                 restoreLabel="Undo"
                 projectLabel="Space"
-                detailsLabel="Details"
+                detailsLabel="Open"
+                completeAriaLabel="Mark todo as done"
+                restoreAriaLabel="Reopen todo"
+                expiredLabel="Overdue"
+                dueLabel="Reminder"
             />
 
             <TaskDetailPanel

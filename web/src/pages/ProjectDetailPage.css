@@ -102,7 +102,7 @@
 
 .yq-document-block-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 14px;
     margin-bottom: 8px;
 }
@@ -141,6 +141,10 @@
 
 .yq-document-block.is-private::after {
     background: #d9b36a;
+}
+
+.yq-document-block.is-todo::after {
+    background: #7d8ca3;
 }
 
 .yq-document-block-eyebrow {
@@ -242,6 +246,12 @@
     font-size: 12px;
     font-weight: 700;
     z-index: 1;
+}
+
+@media (max-width: 1080px) {
+    .yq-document-block-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 @media (max-width: 760px) {

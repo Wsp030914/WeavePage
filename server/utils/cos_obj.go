@@ -1,4 +1,8 @@
-package utils
+﻿package utils
+
+// 文件说明：这个文件封装腾讯云 COS 对象存储能力。
+// 实现方式：维护全局 COS client，并提供头像上传、通用对象存取、对象删除和 key/URL 规范化工具。
+// 这样做的好处是上层服务可以只关心对象 key 和业务校验，不必重复处理底层 SDK 细节。
 
 import (
 	"ToDoList/server/config"
@@ -21,6 +25,7 @@ import (
 
 var Client *cos.Client
 
+// InitCos 初始化全局 COS client。
 func InitCos(cfg *config.COSConfig) error {
 	if cfg == nil {
 		return fmt.Errorf("cos config is nil")
@@ -43,6 +48,8 @@ func InitCos(cfg *config.COSConfig) error {
 	return nil
 }
 
+// PutObj 上传一个 multipart 文件到 COS。
+// 这里自动探测 content-type 和生成随机对象 key，是为了减少同名覆盖和错误 MIME 类型带来的问题。
 func PutObj(ctx context.Context, fh *multipart.FileHeader) (key string, url string, err error) {
 	if Client == nil {
 		return "", "", fmt.Errorf("cos client not initialized")
@@ -98,12 +105,12 @@ func PutObj(ctx context.Context, fh *multipart.FileHeader) (key string, url stri
 // already have their own validation and object-key strategy.
 type COSObjectStore struct{}
 
-// NewCOSObjectStore creates a reusable COS-backed object store adapter.
+// NewCOSObjectStore 创建一个可复用的 COS 对象存储适配器。
 func NewCOSObjectStore() COSObjectStore {
 	return COSObjectStore{}
 }
 
-// PutObject stores an object at the provided key and returns its public URL.
+// PutObject 按指定 key 写入对象并返回可访问 URL。
 func (COSObjectStore) PutObject(ctx context.Context, key string, reader io.Reader, contentType string, contentLength int64) (string, error) {
 	if Client == nil {
 		return "", fmt.Errorf("cos client not initialized")
@@ -135,7 +142,7 @@ func (COSObjectStore) PutObject(ctx context.Context, key string, reader io.Reade
 	return ObjectURLFromKey(key), nil
 }
 
-// GetObject opens an object body for streaming reads.
+// GetObject 读取对象内容流。
 func (COSObjectStore) GetObject(ctx context.Context, key string) (io.ReadCloser, error) {
 	if Client == nil {
 		return nil, fmt.Errorf("cos client not initialized")
@@ -154,11 +161,12 @@ func (COSObjectStore) GetObject(ctx context.Context, key string) (io.ReadCloser,
 	return resp.Body, nil
 }
 
-// DeleteObject removes an object by key or URL.
+// DeleteObject 删除一个对象。
 func (COSObjectStore) DeleteObject(ctx context.Context, key string) error {
 	return DeleteObject(ctx, key)
 }
 
+// DeleteObject 删除一个对象 key 或 URL 指向的对象。
 func DeleteObject(ctx context.Context, key string) error {
 	if Client == nil {
 		return fmt.Errorf("cos client not initialized")
@@ -171,6 +179,7 @@ func DeleteObject(ctx context.Context, key string) error {
 	return err
 }
 
+// NormalizeObjectKey 把对象 URL 或原始 key 规范化成 COS key。
 func NormalizeObjectKey(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -185,6 +194,7 @@ func NormalizeObjectKey(raw string) string {
 	return strings.TrimPrefix(raw, "/")
 }
 
+// ObjectURLFromKey 根据 key 生成对象访问 URL。
 func ObjectURLFromKey(key string) string {
 	key = NormalizeObjectKey(key)
 	if key == "" {

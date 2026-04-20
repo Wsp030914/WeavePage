@@ -1,5 +1,8 @@
-package realtime
+﻿package realtime
 
+// 文件说明：这个文件实现项目元数据锁管理。
+// 实现方式：基于缓存锁按任务字段维度做占用、释放和状态查询。
+// 这样做的好处是多人同时编辑元数据时能显式暴露冲突，减少静默覆盖。
 import (
 	"ToDoList/server/cache"
 	"context"
@@ -40,6 +43,9 @@ type heldProjectLock struct {
 	createdAt time.Time
 }
 
+// NewProjectLockManager 创建项目元数据锁管理器。
+// 这里把锁状态同时保存在本机内存和分布式锁里：前者便于快速判断“当前连接是否已持有锁”，
+// 后者负责多实例之间的互斥。
 func NewProjectLockManager(cacheClient cache.Cache, ttl time.Duration) *ProjectLockManager {
 	if ttl <= 0 {
 		ttl = projectLockTTL
@@ -51,6 +57,8 @@ func NewProjectLockManager(cacheClient cache.Cache, ttl time.Duration) *ProjectL
 	}
 }
 
+// Acquire 为某个任务字段申请元数据锁。
+// 如果当前连接已经持有同一把锁，直接返回已持有状态，避免重复加锁导致自身冲突。
 func (m *ProjectLockManager) Acquire(ctx context.Context, client *projectClient, taskID int, field string) (ProjectServerMessage, error) {
 	if m == nil || m.cache == nil {
 		return ProjectServerMessage{}, ErrProjectLockUnavailable
@@ -100,6 +108,8 @@ func (m *ProjectLockManager) Acquire(ctx context.Context, client *projectClient,
 	return projectLockMessage(ProjectMessageTypeTaskLocked, held, client.hub.nodeID), nil
 }
 
+// Release 释放某个连接持有的字段锁。
+// 只有本连接自己持有的锁才能释放，避免别人误释放当前编辑者的锁。
 func (m *ProjectLockManager) Release(ctx context.Context, client *projectClient, taskID int, field string) (ProjectServerMessage, error) {
 	if m == nil || m.cache == nil {
 		return ProjectServerMessage{}, ErrProjectLockUnavailable
@@ -125,6 +135,8 @@ func (m *ProjectLockManager) Release(ctx context.Context, client *projectClient,
 	return projectLockMessage(ProjectMessageTypeTaskUnlocked, held, client.hub.nodeID), nil
 }
 
+// ReleaseClient 在连接关闭时释放该连接持有的全部锁。
+// 这样做的好处是浏览器关闭、网络断开或页面跳转时不会留下脏锁。
 func (m *ProjectLockManager) ReleaseClient(ctx context.Context, client *projectClient) []ProjectServerMessage {
 	if m == nil || m.cache == nil {
 		return nil

@@ -8,6 +8,7 @@
 - Spaces / Docs
 - Daily Notes
 - Meetings
+- Search
 - Todos
 - 待办次级视图：今日、未来 7 天、日历
 - 用户资料
@@ -36,12 +37,16 @@
 
 - 当前已在 `TaskDetailPanel.jsx` 接入任务正文 Yjs 协同 provider；普通文档和会议纪要启用协同，日记跳过 Yjs provider
 - `TaskDetailPanel.jsx` 对 `doc_type=diary` 使用 CodeMirror plain Markdown 模式，并通过 `PATCH /api/v1/documents/:id/content` 保存正文
+- `TaskDetailPanel.jsx` 已接入文档级评论区：普通文档 / 会议纪要 / 待办支持评论列表、创建、解决/重开和删除，并预留 selection anchor 文本；`doc_type=diary` 不展示评论入口
+- `TaskDetailPanel.jsx` 已支持轻量文档查看者展示、会议行动项转 todo 最小入口，以及日记前一天 / 后一天导航
 - `ProjectDetailPage.jsx` 已接入项目级 WebSocket 事件流和本地增量 patch store
 - `ProjectDetailPage.jsx` 已显示项目级在线人数，来源是 `PRESENCE_SNAPSHOT` 快照
 - `ProjectDetailPage.jsx` 已消费项目级 `TASK_LOCKED` / `TASK_UNLOCKED` / `LOCK_ERROR`，任务行和详情面板会展示 metadata 锁状态
 - `ProjectDetailPage.jsx` 已新增 Notion 风格协作文档块和私人文档块；两个块都支持快速新建文档、分片导入 `.md/.markdown`、附加图片资源并由后端改写 Markdown 图片引用
 - `AppLayout.jsx` 已接入“日记”主导航入口：调用 `api/diary.js` 的 `openTodayDiary()`，成功后刷新空间列表并跳转到 `/projects/:id?task=:taskId`
 - `AppLayout.jsx` 已接入“会议”主导航入口：调用 `api/meeting.js` 的 `createMeetingNote()`，成功后创建会议纪要并跳转到 `/projects/:id?task=:taskId`
+- `AppLayout.jsx` 已接入“Search”主导航入口；`SearchPage.jsx` 会先基于 `useProjects()` 本地搜索空间名，再调用 `api/search.js` 的 `searchWorkspace()` 搜索文档 / 会议 / 待办
+- `AppLayout.jsx` 已接入“回收站”入口；`TrashPage.jsx` 同时使用 task 与 project 回收站接口列出、恢复和彻底删除软删除文档/空间
 - `ProjectDetailPage.jsx` 已支持 `?task=<id>` 自动打开指定文档详情，日记入口和后续全局文档入口都可复用这个机制
 - `MyTasksPage.jsx`、`Next7DaysPage.jsx`、`CalendarPage.jsx` 已复用本地 patch helper，后续应收敛为 Todos 模块的次级视图
 - 新产品主导航应参考 `docs/plans/obsidian-notion-product-redesign.md`，优先 Spaces / Docs / Daily Notes / Meetings，Todos 是轻量辅助模块
@@ -60,6 +65,11 @@
   症状：页面加载所有项目后再按项目拉任务
   原因：`getTasksAcrossProjects()` 会并发拉多个项目任务
   结论：如果项目数变大，这条链路会先遇到性能问题
+
+- 当前全局 Search 已改为后端聚合搜索，但还不是全文索引
+  症状：`SearchPage.jsx` 搜索文档时不再逐空间拉任务，而是调用 `GET /api/v1/search`
+  原因：前端扫描会随空间数和正文体积线性放大，且难以统一权限与排序
+  结论：继续搜索增强时应在后端替换为全文索引或搜索服务，不要把文档扫描逻辑加回前端
 
 - 当前任务详情的元数据保存已带 `expected_version`
   结论：改 `TaskDetailPanel.jsx` 的保存逻辑时，不要移除 `task.version`；版本冲突失败后应让调用页重新拉取或通过实时事件收敛
@@ -98,10 +108,12 @@
 
 - `pages/ProjectListPage.jsx`
   - 项目列表、创建、重命名、删除
+- `pages/SearchPage.jsx`
+  - 顶层搜索页，支持空间即时搜索和后端文档聚合搜索，结果复用 `/projects/:id?task=:taskId` 打开详情
 - `pages/ProjectDetailPage.jsx`
   - 项目详情、协作文档块、私人文档块、Markdown 导入、任务列表、`?task=<id>` 自动打开文档
 - `components/TaskDetailPanel.jsx`
-  - 任务详情编辑、成员管理、优先级和截止时间
+  - 文档详情编辑、成员管理、优先级、截止时间、评论、查看者、会议行动项和日记前后导航
 - `layouts/AppLayout.jsx`
   - 主导航、日记快捷入口、空间列表
 - `pages/MyTasksPage.jsx`
@@ -122,12 +134,15 @@
   - `processedMessageIDs`
 - `ProjectDetailPage.jsx` 和 `TaskDetailPanel.jsx` 会是协同改造的第一落点
 - `realtime/yjsTaskContentProvider.js` 已负责单任务正文的 Yjs 文档、WebSocket 同步、seed 初始化和断线前 outbox 缓冲
-- `realtime/projectEventsSocket.js` 已负责项目级任务事件连接、断线重连、`PROJECT_INIT` 补偿、`TASK_*` 消息分发、`PRESENCE_SNAPSHOT` 分发和 `LOCK_REQUEST` / `LOCK_RELEASE` 发送
-- `store/collab-store.js` 已提供项目任务 upsert/remove、事件 apply、选中任务同步、presence 快照合并和 metadata 锁状态 helper；后续聚合页改造优先复用这里，不要在页面里复制事件解析逻辑
+- `realtime/projectEventsSocket.js` 已负责项目级任务事件连接、断线重连、`PROJECT_INIT` 补偿、`TASK_*` 消息分发、`PRESENCE_SNAPSHOT` 分发、`VIEW_DOCUMENT` 发送和 `LOCK_REQUEST` / `LOCK_RELEASE` 发送
+- `store/collab-store.js` 已提供项目任务 upsert/remove、事件 apply、选中任务同步、presence 快照合并、文档查看 presence 合并和 metadata 锁状态 helper；后续聚合页改造优先复用这里，不要在页面里复制事件解析逻辑
 - `api/documentImport.js` 是 Markdown 导入客户端封装；不要把分片上传逻辑散落到页面外的其它 API 文件
-- `api/diary.js` 是今日日记入口封装；不要在布局或页面里直接拼 `/diary/today`
+- `api/diary.js` 是日记入口封装；不要在布局或页面里直接拼 `/diary/today` 或 `/diary/:date`
 - `api/task.js` 的 `saveDocumentContent()` 是 diary plain Markdown 正文保存封装；不要在组件里直接拼 `/documents/:id/content`
-- `api/meeting.js` 是会议纪要入口封装；不要在布局或页面里直接拼 `/meetings`
+- `api/task.js` 已收口评论相关封装：`getTaskComments()`、`createTaskComment()`、`updateTaskComment()`、`deleteTaskComment()`；评论锚点字段也应继续走这里，不要在组件里手写评论接口 URL
+- `api/meeting.js` 是会议纪要和会议行动项入口封装；不要在布局或页面里直接拼 `/meetings` 或 `/meetings/:id/actions`
+- `api/search.js` 是后端搜索入口封装；不要在搜索页恢复逐空间 `getTasksAcrossProjects()` 扫描
+- `api/project.js` 已收口空间回收站封装：`getTrashSpaces()`、`restoreTrashSpace()`、`deleteTrashedSpace()`
 
 ## 改动时必须联动检查
 

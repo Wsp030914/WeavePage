@@ -1,5 +1,9 @@
 package service
 
+// 文件说明：这个文件实现会议纪要创建相关业务。
+// 实现方式：围绕“找到或创建会议空间、生成标题模板、创建协作文档”这条链路做编排。
+// 这样做的好处是会议入口可以保持一键创建，同时把空间创建、标题冲突处理和默认模板注入集中管理。
+
 import (
 	apperrors "ToDoList/server/errors"
 	"ToDoList/server/models"
@@ -32,7 +36,13 @@ type MeetingCreateResult struct {
 	Task    *models.Task    `json:"task"`
 }
 
-// CreateMeetingNote creates a collaborative meeting note with a default template.
+type MeetingActionTodoInput struct {
+	Title string
+	DueAt *time.Time
+}
+
+// CreateMeetingNote 创建一份协作型会议纪要。
+// 标题冲突时按次数重试生成备选标题，是为了让“快速创建会议”尽量无感成功，不把重命名压力推给前端。
 func (s *TaskService) CreateMeetingNote(ctx context.Context, lg *zap.Logger, uid int, in CreateMeetingInput) (*MeetingCreateResult, error) {
 	if uid <= 0 {
 		return nil, apperrors.NewParamError("无效的用户")
@@ -74,6 +84,32 @@ func (s *TaskService) CreateMeetingNote(ctx context.Context, lg *zap.Logger, uid
 	return nil, apperrors.NewConflictError("会议纪要标题冲突，请重试")
 }
 
+func (s *TaskService) CreateTodoFromMeetingAction(ctx context.Context, lg *zap.Logger, uid, meetingID int, in MeetingActionTodoInput) (*models.Task, error) {
+	meeting, err := s.GetDetail(ctx, lg, uid, meetingID)
+	if err != nil {
+		return nil, err
+	}
+	if meeting.DocType != models.DocTypeMeeting {
+		return nil, apperrors.NewParamError("document is not a meeting note")
+	}
+	title := strings.TrimSpace(in.Title)
+	if title == "" {
+		return nil, apperrors.NewParamError("todo title is required")
+	}
+	content := fmt.Sprintf("Created from meeting: %s", meeting.Title)
+	return s.Create(ctx, lg, uid, CreateTaskInput{
+		Title:             title,
+		ProjectID:         meeting.ProjectID,
+		ContentMD:         &content,
+		DocType:           models.DocTypeTodo,
+		CollaborationMode: models.CollaborationModeCollaborative,
+		Status:            stringPtr(models.TaskTodo),
+		DueAt:             in.DueAt,
+	})
+}
+
+// resolveMeetingProject 决定会议纪要落在哪个空间。
+// 调用方显式传了 project_id 时优先复用该空间，否则自动落到“会议”空间。
 func (s *TaskService) resolveMeetingProject(ctx context.Context, lg *zap.Logger, uid int, projectID *int) (*models.Project, error) {
 	if projectID != nil {
 		if *projectID <= 0 {
@@ -93,6 +129,8 @@ func (s *TaskService) resolveMeetingProject(ctx context.Context, lg *zap.Logger,
 	return s.getOrCreateMeetingProject(ctx, lg, uid)
 }
 
+// getOrCreateMeetingProject 获取或创建用户的“会议”空间。
+// 这里对并发创建场景做了 duplicate 回查，是为了避免用户快速重复点击时创建出多个同名会议空间。
 func (s *TaskService) getOrCreateMeetingProject(ctx context.Context, lg *zap.Logger, uid int) (*models.Project, error) {
 	project, err := s.projectRepo.GetByUserName(ctx, uid, meetingSpaceName)
 	if err == nil {
@@ -127,6 +165,8 @@ func (s *TaskService) getOrCreateMeetingProject(ctx context.Context, lg *zap.Log
 	return nil, apperrors.NewInternalError("创建会议空间失败")
 }
 
+// cacheProjectAsync 异步把自动创建的空间回填到项目缓存。
+// 会议空间和日记空间都复用这段逻辑，是为了避免重复维护同一套缓存热身代码。
 func cacheProjectAsync(projectCacheSetter interface {
 	Set(ctx context.Context, uid, pid int, project *models.Project) error
 	AddProjectID(ctx context.Context, uid int, pid int, score float64) error
@@ -146,10 +186,12 @@ func cacheProjectAsync(projectCacheSetter interface {
 	}()
 }
 
+// cacheMeetingProjectAsync 回填会议空间缓存。
 func (s *TaskService) cacheMeetingProjectAsync(lg *zap.Logger, uid int, project *models.Project) {
 	cacheProjectAsync(s.projectCache, lg, uid, project, "meeting.create")
 }
 
+// meetingTitleByAttempt 根据重试次数生成会议标题。
 func meetingTitleByAttempt(baseTitle string, attempt int) string {
 	if attempt == 0 {
 		return baseTitle
@@ -157,10 +199,13 @@ func meetingTitleByAttempt(baseTitle string, attempt int) string {
 	return fmt.Sprintf("%s (%d)", baseTitle, attempt+1)
 }
 
+// defaultMeetingTitle 生成默认会议标题。
 func defaultMeetingTitle(now time.Time) string {
 	return "会议纪要 " + now.In(shanghaiLocation()).Format("2006-01-02 15:04")
 }
 
+// defaultMeetingTemplate 生成会议纪要默认 Markdown 模板。
+// 默认模板把时间、参会人、议题、结论和行动项一次性铺开，是为了让会议记录从创建瞬间就进入可填写状态。
 func defaultMeetingTemplate(now time.Time) string {
 	timestamp := now.In(shanghaiLocation()).Format("2006-01-02 15:04")
 	return fmt.Sprintf(
@@ -169,6 +214,8 @@ func defaultMeetingTemplate(now time.Time) string {
 	)
 }
 
+// shanghaiLocation 返回 Asia/Shanghai 时区。
+// 这里对时区加载失败做 fixed zone 兜底，是为了让标题和模板时间在运行环境不完整时仍然稳定。
 func shanghaiLocation() *time.Location {
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {

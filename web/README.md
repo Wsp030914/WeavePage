@@ -1,16 +1,18 @@
 # web 模块说明
 
-这是 ToDoList 的前端模块，基于 React + Vite 构建。
+这是 WeavePage 的前端模块，基于 React + Vite 构建。当前产品形态已经从传统待办 UI 收敛为 Obsidian + Notion 风格的协同文档工作台。
 
 ## 当前页面
 
 - 登录
 - 注册
-- 项目列表
-- 项目详情
-- 今日任务
-- 未来 7 天
-- 日历
+- Spaces 首页
+- Space 详情：协作文档、私人文档、轻量待办、Markdown 导入、Recent Activity
+- Daily Notes：打开或创建当天 `YYYY-MM-DD.md`
+- Meetings：创建带模板的协作会议纪要
+- Search：搜索空间，并按需扫描文档、会议纪要和待办
+- Todos：今日、未来 7 天、日历
+- Trash：恢复或彻底删除软删除文档 / 待办
 - 个人资料
 
 ## 开发命令
@@ -56,7 +58,8 @@ Vite 已配置开发代理：
 - `src/pages/ProjectDetailPage.jsx` 已接入项目级 WebSocket 事件流和本地增量 patch
 - `src/pages/ProjectDetailPage.jsx` 已显示项目级在线人数，来源是 `PRESENCE_SNAPSHOT`
 - `src/pages/ProjectDetailPage.jsx` 已消费项目级 metadata 锁事件；任务行和详情面板会展示锁状态，详情面板编辑元数据时会申请/释放 `metadata` 锁
-- 今日任务、未来 7 天、日历等聚合页仍然通过重新拉取 HTTP 数据刷新页面
+- `src/pages/SearchPage.jsx` 复用 `getTasksAcrossProjects()` 做前端扫描式搜索；这不是后端全文检索，数据量变大后应新增专门搜索接口或索引
+- 今日任务、未来 7 天、日历等聚合页已在自身写操作成功后做本地 patch；仍未订阅跨项目实时事件
 
 如果后端开始接入实时协同、版本控制或 WebSocket，需要优先联动：
 

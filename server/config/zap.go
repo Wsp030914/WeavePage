@@ -1,5 +1,9 @@
 package config
 
+// 文件说明：这个文件定义日志配置并初始化 Zap logger。
+// 实现方式：加载 zap 配置后生成 encoder、sink、core 和 option，再组装出最终 logger。
+// 这样做的好处是日志输出格式、级别和文件落盘策略都能集中配置。
+
 import (
 	"fmt"
 	"os"
@@ -30,6 +34,7 @@ type LogFileConfig struct {
 	Errput   []string `mapstructure:"errput"`
 }
 
+// LoadZapConfig 读取 zap 日志配置。
 func LoadZapConfig() (*ZapConfig, error) {
 	v := viper.New()
 	if p := strings.TrimSpace(os.Getenv("TODO_CONFIG_FILE")); p != "" {
@@ -53,6 +58,8 @@ func LoadZapConfig() (*ZapConfig, error) {
 
 }
 
+// InitZap 初始化 Zap logger。
+// logger 初始化和业务配置拆开，是为了让日志系统能更早参与启动期问题排查。
 func InitZap(config *ZapConfig) *zap.Logger {
 	// 构建编码器
 	encoder := zapEncoder(config)
@@ -66,6 +73,7 @@ func InitZap(config *ZapConfig) *zap.Logger {
 	return logger
 }
 
+// zapEncoder 按配置创建日志编码器。
 func zapEncoder(config *ZapConfig) zapcore.Encoder {
 	// 新建一个配置
 	encoderConfig := zapcore.EncoderConfig{
@@ -98,6 +106,8 @@ func zapEncoder(config *ZapConfig) zapcore.Encoder {
 
 }
 
+// tee 构建 Zap core 和 option 组合。
+// 信息日志和错误日志拆不同 sink，是为了让排障和归档更容易分流。
 func tee(cfg *ZapConfig, encoder zapcore.Encoder) (zapcore.Core, []zap.Option) {
 
 	al, err := zap.ParseAtomicLevel(strings.ToLower(cfg.Level))
@@ -135,6 +145,7 @@ func tee(cfg *ZapConfig, encoder zapcore.Encoder) (zapcore.Core, []zap.Option) {
 
 }
 
+// makeFileSink 为多个日志路径创建轮转写入器。
 func makeFileSink(paths []string, lf *LogFileConfig) zapcore.WriteSyncer {
 	syncers := make([]zapcore.WriteSyncer, 0, len(paths))
 	for _, p := range paths {
@@ -150,7 +161,7 @@ func makeFileSink(paths []string, lf *LogFileConfig) zapcore.WriteSyncer {
 	return zap.CombineWriteSyncers(syncers...)
 }
 
-// 构建Option
+// buildOptions 根据配置决定是否打开 caller 和 stacktrace。
 func buildOptions(cfg *ZapConfig, levelEnabler zapcore.LevelEnabler) (options []zap.Option) {
 	if cfg.Caller {
 		options = append(options, zap.AddCaller()) //增加行号

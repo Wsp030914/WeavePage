@@ -14,8 +14,16 @@ export const syncProjectEvents = async (projectId, cursor = 0, limit = 100) => {
     });
 };
 
+export const getProjectActivities = async (projectId, params) => {
+    return client.get(`/projects/${projectId}/activities`, { params });
+};
+
 export const getMyTasks = async (params) => {
     return client.get('/tasks/me', { params });
+};
+
+export const getTrashTasks = async (params) => {
+    return client.get('/trash/tasks', { params });
 };
 
 export const getAllProjectTasks = async (projectId, pageSize = 100) => {
@@ -77,8 +85,32 @@ export const saveDocumentContent = async (taskId, data, expectedVersion) => {
     return client.patch(`/documents/${taskId}/content`, payload);
 };
 
+export const getTaskComments = async (taskId) => {
+    return client.get(`/documents/${taskId}/comments`);
+};
+
+export const createTaskComment = async (taskId, data) => {
+    return client.post(`/documents/${taskId}/comments`, data);
+};
+
+export const updateTaskComment = async (commentId, data) => {
+    return client.patch(`/comments/${commentId}`, data);
+};
+
+export const deleteTaskComment = async (commentId) => {
+    return client.delete(`/comments/${commentId}`);
+};
+
 export const deleteTask = async (id) => {
     return client.delete(`/tasks/${id}`);
+};
+
+export const restoreTrashTask = async (id) => {
+    return client.post(`/trash/tasks/${id}/restore`);
+};
+
+export const deleteTrashedTask = async (id) => {
+    return client.delete(`/trash/tasks/${id}`);
 };
 
 export const addTaskMember = async (projectId, taskId, data) => {

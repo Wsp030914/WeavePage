@@ -1,5 +1,9 @@
 package realtime
 
+// 文件说明：这个文件定义正文协同实时协议结构。
+// 实现方式：集中声明正文消息类型、增量更新载荷和跨节点广播信封结构。
+// 这样做的好处是正文协同的协议层独立于 hub 运行时，后续扩字段或改前端 provider 时更容易收敛影响面。
+
 const (
 	ContentMessageTypeSync   = "CONTENT_SYNC"
 	ContentMessageTypeInit   = "CONTENT_INIT"

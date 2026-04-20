@@ -1,5 +1,9 @@
 package realtime
 
+// 文件说明：这个文件为对应模块提供测试，重点保护关键边界、并发语义和容易回归的行为。
+// 实现方式：通过 stub、最小集成场景或显式断言覆盖最脆弱的逻辑分支。
+// 这样做的好处是后续重构、补注释或调整实现时，可以快速发现行为回归。
+
 import (
 	"ToDoList/server/service"
 	"context"
@@ -90,6 +94,7 @@ func (s *projectLockCacheStub) Expire(ctx context.Context, key string, ttl time.
 	panic("unexpected call to Expire")
 }
 
+// TestProjectLockManager_AcquireRejectsConcurrentHolderAndReleases 验证已有持有者时并发加锁会被拒绝，且释放后缓存会清空。
 func TestProjectLockManager_AcquireRejectsConcurrentHolderAndReleases(t *testing.T) {
 	t.Parallel()
 
@@ -129,6 +134,7 @@ func TestProjectLockManager_AcquireRejectsConcurrentHolderAndReleases(t *testing
 	}
 }
 
+// TestProjectLockManager_ReleaseClientUnlocksAllHeldLocks 验证客户端断开时会释放它持有的全部项目锁。
 func TestProjectLockManager_ReleaseClientUnlocksAllHeldLocks(t *testing.T) {
 	t.Parallel()
 

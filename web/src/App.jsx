@@ -14,6 +14,8 @@ import MyTasksPage from './pages/MyTasksPage';
 import Next7DaysPage from './pages/Next7DaysPage';
 import CalendarPage from './pages/CalendarPage';
 import ProfilePage from './pages/ProfilePage';
+import TrashPage from './pages/TrashPage';
+import SearchPage from './pages/SearchPage';
 
 function AppRoutes() {
   const { user, loading } = useAuth();
@@ -39,6 +41,8 @@ function AppRoutes() {
         <Route index element={<ProjectListPage />} />
         <Route path="tasks/me" element={<MyTasksPage />} />
         <Route path="tasks/next7" element={<Next7DaysPage />} />
+        <Route path="search" element={<SearchPage />} />
+        <Route path="trash" element={<TrashPage />} />
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="projects/:id" element={<ProjectDetailPage />} />

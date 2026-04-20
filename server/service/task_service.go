@@ -1,5 +1,8 @@
 package service
 
+// 文件说明：这个文件实现任务与文档主业务，负责创建、更新、删除、回收站、列表、成员与到期提醒等核心流程。
+// 实现方式：通过服务层组合 repo、cache、bus、scheduler 与锁，实现业务校验、一致性与副作用编排。
+// 这样做的好处是复杂规则集中，便于同时维护缓存一致性、并发控制和异步副作用。
 import (
 	"ToDoList/server/async"
 	"ToDoList/server/cache"
@@ -206,6 +209,7 @@ func (s *TaskService) Create(ctx context.Context, lg *zap.Logger, uid int, in Cr
 
 	var created *models.Task
 	var taskEvent *models.TaskEvent
+	// 任务创建和事件追加放进同一个事务，是为了保证“事实数据”和“同步事件”不会脱节。
 	err = s.withTaskMutation(ctx, func(taskRepo repo.TaskRepository, eventRepo repo.TaskEventRepository) error {
 		var createErr error
 		created, createErr = taskRepo.Create(ctx, task)
@@ -293,6 +297,8 @@ func (s *TaskService) Update(ctx context.Context, lg *zap.Logger, uid, pid int, 
 
 	lock := cache.NewDistributedLock(s.cacheClient, lockKey, 5*time.Second)
 
+	// 元数据更新仍然先抢分布式锁，再做版本 CAS。
+	// 锁用于降低高并发下同时写入的竞争噪声，CAS 用于兜底发现最后仍然发生的并发覆盖。
 	acquired, err := lock.Acquire(ctx)
 	if err != nil {
 		lg.Error("task.update.lock_acquire_failed", zap.Error(err))
@@ -430,6 +436,8 @@ func (s *TaskService) Update(ctx context.Context, lg *zap.Logger, uid, pid int, 
 		affected  int64
 		taskEvent *models.TaskEvent
 	)
+	// 删除对外表现为“移入回收站”，因此这里走软删除。
+	// 同时继续写入 task.deleted 事件，让前端活动列表能立刻把文档移除。
 	err = s.withTaskMutation(ctx, func(taskRepo repo.TaskRepository, eventRepo repo.TaskEventRepository) error {
 		var updateErr error
 		updated, updateErr, affected = taskRepo.Update(ctx, id, *in.ExpectedVersion, update)
@@ -520,14 +528,19 @@ func (s *TaskService) Delete(ctx context.Context, lg *zap.Logger, uid int, id in
 
 	var affected int64
 	var taskEvent *models.TaskEvent
+	deletedAt := time.Now()
+	trashedTask := *task
+	trashedTask.DeletedAt = gorm.DeletedAt{Time: deletedAt, Valid: true}
+	trashedTask.DeletedBy = intPtr(uid)
+	trashedTask.DeletedTitle = task.Title
 	err = s.withTaskMutation(ctx, func(taskRepo repo.TaskRepository, eventRepo repo.TaskEventRepository) error {
 		var deleteErr error
-		affected, deleteErr = taskRepo.DeleteByID(ctx, id)
+		affected, deleteErr = taskRepo.SoftDeleteByID(ctx, id, uid, deletedAt, buildTrashedTaskTitle(task.Title, id, deletedAt), task.Title)
 		if deleteErr != nil {
 			return deleteErr
 		}
 		var eventErr error
-		taskEvent, eventErr = s.appendTaskEvent(ctx, eventRepo, models.TaskEventTypeDeleted, uid, task)
+		taskEvent, eventErr = s.appendTaskEvent(ctx, eventRepo, models.TaskEventTypeDeleted, uid, &trashedTask)
 		return eventErr
 	})
 	if err != nil {
@@ -623,6 +636,25 @@ type TaskListResult struct {
 	Total int64
 }
 
+type WorkspaceSearchInput struct {
+	Query string
+	Limit int
+}
+
+type WorkspaceSearchResult struct {
+	Spaces    []models.Project `json:"spaces"`
+	Documents []models.Task    `json:"documents"`
+}
+
+type TrashListInput struct {
+	Page int
+	Size int
+}
+
+type TrashRestoreResult struct {
+	Task *models.Task `json:"task"`
+}
+
 func (s *TaskService) rebuildTaskListCacheAsync(lg *zap.Logger, pid int, status string) {
 	go func() {
 		statusKey := status
@@ -713,8 +745,8 @@ func (s *TaskService) List(ctx context.Context, lg *zap.Logger, uid int, in Task
 	ids, err = s.taskCache.GetTaskIDs(ctx, in.Pid, in.Status, page, size)
 	if err != nil {
 		if errors.Is(err, cache.ErrCacheMiss) {
-			// Avoid full-table ID rebuild in request path under high concurrency.
-			// Rebuild asynchronously and serve this request from paged DB fallback.
+			// 高并发下如果缓存缺失，先异步修缓存，再让当前请求走分页 DB fallback。
+			// 这样可以避免所有并发请求都触发全量 ID 重建。
 			repairCache = true
 			goto DB_FALLBACK
 		} else {
@@ -725,7 +757,8 @@ func (s *TaskService) List(ctx context.Context, lg *zap.Logger, uid int, in Task
 	}
 
 	if len(ids) > 0 {
-		// MGet from Redis first
+		// 先尝试从 Redis 批量拿详情，再只回源缺失的部分。
+		// 这样比整页全部回库更省数据库压力。
 		cachedTasks, missingIDs, err := s.taskCache.MGetDetail(ctx, uid, ids)
 		if err != nil {
 			lg.Warn("task.list.mget_failed", zap.Error(err))
@@ -736,7 +769,7 @@ func (s *TaskService) List(ctx context.Context, lg *zap.Logger, uid int, in Task
 			cachedTasks = make(map[int]*models.Task)
 		}
 
-		// If there are missing tasks, fetch them from DB
+		// 有缺失时再按需回库，并把结果回填详情缓存。
 		if len(missingIDs) > 0 {
 			fetchIDs := append([]int(nil), ids...)
 			statusKey := in.Status
@@ -796,7 +829,7 @@ func (s *TaskService) List(ctx context.Context, lg *zap.Logger, uid int, in Task
 			}
 		}
 
-		// Validate if we retrieved all requested tasks (handle stale ZSet entries)
+		// 这里额外校验一次，是为了处理 ZSet 里残留了过期 taskID 的情况。
 		tasks = make([]models.Task, 0, len(ids))
 		for _, id := range ids {
 			t, ok := cachedTasks[id]
@@ -838,8 +871,7 @@ DB_FALLBACK:
 	sfKey := fmt.Sprintf("task:list:fallback:%d:%s:%d:%d", in.Pid, statusKey, page, size)
 
 	shared, sharedErr := loadWithCacheProtection(ctx, lg, &s.sf, s.cacheClient, sfKey, func(loadCtx context.Context) (interface{}, error) {
-		// Decouple from caller cancellation so one canceled request does not
-		// abort the shared fallback query for all concurrent callers.
+		// 这里故意和调用方 ctx 解绑，避免某个请求取消后，把同批共享 fallback 查询一起打断。
 		dbCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 
@@ -924,6 +956,200 @@ func (s *TaskService) ListMyTasks(ctx context.Context, lg *zap.Logger, uid int, 
 	}
 
 	return &TaskListResult{Tasks: tasks, Total: total}, nil
+}
+
+func (s *TaskService) SearchWorkspace(ctx context.Context, lg *zap.Logger, uid int, in WorkspaceSearchInput) (*WorkspaceSearchResult, error) {
+	query := strings.TrimSpace(in.Query)
+	if len(query) < 2 {
+		return nil, apperrors.NewParamError("query must be at least 2 characters")
+	}
+	limit := in.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+
+	spaces, _, err := s.projectRepo.Search(ctx, uid, query, 1, limit)
+	if err != nil {
+		lg.Error("workspace.search.spaces_failed", zap.Int("uid", uid), zap.String("query", query), zap.Error(err))
+		return nil, apperrors.NewInternalError("failed to search workspace")
+	}
+	documents, err := s.repo.SearchByUser(ctx, uid, query, limit)
+	if err != nil {
+		lg.Error("workspace.search.documents_failed", zap.Int("uid", uid), zap.String("query", query), zap.Error(err))
+		return nil, apperrors.NewInternalError("failed to search workspace")
+	}
+
+	return &WorkspaceSearchResult{Spaces: spaces, Documents: documents}, nil
+}
+
+func (s *TaskService) ListTrash(ctx context.Context, lg *zap.Logger, uid int, in TrashListInput) (*TaskListResult, error) {
+	page := in.Page
+	size := in.Size
+	if page < 1 {
+		page = 1
+	}
+	if size <= 0 || size > 100 {
+		size = 20
+	}
+
+	tasks, total, err := s.repo.ListDeletedByUser(ctx, uid, page, size)
+	if err != nil {
+		lg.Error("task.list_trash.failed", zap.Int("uid", uid), zap.Error(err))
+		return nil, apperrors.NewInternalError("failed to load trash")
+	}
+
+	return &TaskListResult{Tasks: tasks, Total: total}, nil
+}
+
+func (s *TaskService) RestoreFromTrash(ctx context.Context, lg *zap.Logger, uid, id int) (*TrashRestoreResult, error) {
+	lg.Info("task.restore.begin", zap.Int("uid", uid), zap.Int("task_id", id))
+
+	task, err := s.repo.GetDeletedByIDAndUser(ctx, id, uid)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperrors.NewNotFoundError("task not found in trash")
+		}
+		return nil, apperrors.NewInternalError("failed to query trashed task")
+	}
+
+	lockKey := fmt.Sprintf("task_lock:%d", id)
+	lock := cache.NewDistributedLock(s.cacheClient, lockKey, 5*time.Second)
+	acquired, err := lock.Acquire(ctx)
+	if err != nil {
+		lg.Error("task.restore.lock_acquire_failed", zap.Error(err))
+		return nil, apperrors.NewInternalError("system busy, please retry later")
+	}
+	if !acquired {
+		return nil, apperrors.NewConflictError("task is being edited, please retry later")
+	}
+	defer func() {
+		if err := lock.Release(ctx); err != nil {
+			lg.Error("task.restore.lock_release_failed", zap.Error(err))
+		}
+	}()
+
+	task, err = s.repo.GetDeletedByIDAndUser(ctx, id, uid)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperrors.NewNotFoundError("task not found in trash")
+		}
+		return nil, apperrors.NewInternalError("failed to query trashed task")
+	}
+
+	restoreTitle := strings.TrimSpace(task.DeletedTitle)
+	if restoreTitle == "" {
+		restoreTitle = strings.TrimSpace(task.Title)
+	}
+	if restoreTitle == "" {
+		return nil, apperrors.NewConflictError("task title is missing")
+	}
+
+	// 恢复前先检查同空间是否已经存在同名活动文档。
+	// 这样可以在恢复阶段提前把唯一标题冲突暴露出来，而不是等数据库报错后再兜底解释。
+	existing, err := s.repo.GetByUserProjectTitle(ctx, uid, task.ProjectID, restoreTitle)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		lg.Error("task.restore.check_title_failed", zap.Int("uid", uid), zap.Int("task_id", id), zap.Error(err))
+		return nil, apperrors.NewInternalError("failed to restore task")
+	}
+	if existing != nil && existing.ID != 0 {
+		return nil, apperrors.NewConflictError("a task with the same title already exists in this space")
+	}
+
+	var affected int64
+	restored := *task
+	restored.Title = restoreTitle
+	restored.DeletedTitle = ""
+	restored.DeletedBy = nil
+	restored.DeletedAt = gorm.DeletedAt{}
+
+	var taskEvent *models.TaskEvent
+	err = s.withTaskMutation(ctx, func(taskRepo repo.TaskRepository, eventRepo repo.TaskEventRepository) error {
+		var restoreErr error
+		affected, restoreErr = taskRepo.RestoreByID(ctx, id, restoreTitle)
+		if restoreErr != nil {
+			return restoreErr
+		}
+		var eventErr error
+		taskEvent, eventErr = s.appendTaskEvent(ctx, eventRepo, models.TaskEventTypeCreated, uid, &restored)
+		return eventErr
+	})
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperrors.NewNotFoundError("task not found in trash")
+		}
+		if strings.Contains(err.Error(), "Duplicate") || strings.Contains(err.Error(), "1062") {
+			return nil, apperrors.NewConflictError("a task with the same title already exists in this space")
+		}
+		return nil, apperrors.NewInternalError("failed to restore task")
+	}
+	if affected == 0 {
+		return nil, apperrors.NewConflictError("task restore conflict")
+	}
+
+	s.taskCache.DelDetail(ctx, uid, id)
+	s.publishTaskEvent(ctx, taskEvent)
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		score := restored.CalculateScore()
+		_ = s.taskCache.AddTaskID(ctx, restored.ProjectID, "", restored.ID, score)
+		if restored.Status != "" {
+			_ = s.taskCache.AddTaskID(ctx, restored.ProjectID, restored.Status, restored.ID, score)
+		}
+	}()
+
+	s.scheduleDueIfNeeded(lg, &restored)
+	return &TrashRestoreResult{Task: &restored}, nil
+}
+
+func (s *TaskService) DeleteFromTrash(ctx context.Context, lg *zap.Logger, uid, id int) (int64, error) {
+	lg.Info("task.delete_permanently.begin", zap.Int("uid", uid), zap.Int("task_id", id))
+
+	task, err := s.repo.GetDeletedByIDAndUser(ctx, id, uid)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, apperrors.NewNotFoundError("task not found in trash")
+		}
+		return 0, apperrors.NewInternalError("failed to query trashed task")
+	}
+
+	lockKey := fmt.Sprintf("task_lock:%d", id)
+	lock := cache.NewDistributedLock(s.cacheClient, lockKey, 5*time.Second)
+	acquired, err := lock.Acquire(ctx)
+	if err != nil {
+		lg.Error("task.delete_permanently.lock_acquire_failed", zap.Error(err))
+		return 0, apperrors.NewInternalError("system busy, please retry later")
+	}
+	if !acquired {
+		return 0, apperrors.NewConflictError("task is being edited, please retry later")
+	}
+	defer func() {
+		if err := lock.Release(ctx); err != nil {
+			lg.Error("task.delete_permanently.lock_release_failed", zap.Error(err))
+		}
+	}()
+
+	affected, err := s.repo.DeleteByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, apperrors.NewNotFoundError("task not found in trash")
+		}
+		return 0, apperrors.NewInternalError("failed to permanently delete task")
+	}
+
+	s.taskCache.DelDetail(ctx, uid, id)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = s.taskCache.RemTaskID(ctx, task.ProjectID, "", id)
+		if task.Status != "" {
+			_ = s.taskCache.RemTaskID(ctx, task.ProjectID, task.Status, id)
+		}
+	}()
+
+	s.cancelDue(lg, id)
+	return affected, nil
 }
 
 func (s *TaskService) AddMember(ctx context.Context, lg *zap.Logger, uid, taskID int, targetEmail, role string) error {
@@ -1231,6 +1457,18 @@ func shouldScheduleTask(task *models.Task) bool {
 		task.Status == models.TaskTodo &&
 		task.DueAt != nil &&
 		!task.Notified
+}
+
+func buildTrashedTaskTitle(title string, id int, deletedAt time.Time) string {
+	base := strings.TrimSpace(title)
+	if base == "" {
+		base = fmt.Sprintf("task-%d", id)
+	}
+	return fmt.Sprintf("%s [trashed-%d-%d]", base, id, deletedAt.Unix())
+}
+
+func intPtr(v int) *int {
+	return &v
 }
 
 func (s *TaskService) StartDueWatcher(ctx context.Context, lg *zap.Logger) {

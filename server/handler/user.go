@@ -1,4 +1,8 @@
-package handler
+﻿package handler
+
+// 文件说明：这个文件负责用户账号相关的 HTTP 接口。
+// 实现方式：接口层处理 JSON 或 multipart 参数绑定、上下文提取和统一错误响应，账号规则放在 UserService。
+// 这样做的好处是登录、注册、资料更新这些协议差异都留在边界层，核心账号逻辑仍然保持集中。
 
 import (
 	apperrors "ToDoList/server/errors"
@@ -38,13 +42,14 @@ type UserHandler struct {
 	svc *service.UserService
 }
 
+// NewUserHandler 创建用户接口处理器。
 func NewUserHandler(svc *service.UserService) *UserHandler {
 	return &UserHandler{svc: svc}
 }
 
-// Login
+// Login 处理用户登录请求。
 // @Summary 用户登录
-// @Description 使用用户名和密码登录
+// @Description 使用用户名或邮箱和密码登录
 // @Tags User
 // @Accept json
 // @Produce json
@@ -77,7 +82,7 @@ func (u *UserHandler) Login(c *gin.Context) {
 	})
 }
 
-// Register
+// Register 处理用户注册请求。
 // @Summary 用户注册
 // @Description 注册新用户，支持头像上传
 // @Tags User
@@ -124,7 +129,7 @@ func (u *UserHandler) Register(c *gin.Context) {
 	response.Success(c, res.User)
 }
 
-// Logout
+// Logout 注销当前登录态。
 // @Summary 退出登录
 // @Description 注销当前用户的登录状态
 // @Tags User
@@ -165,7 +170,7 @@ func (u *UserHandler) Logout(c *gin.Context) {
 	response.SuccessWithMsg(c, "已退出登录", nil)
 }
 
-// GetProfile
+// GetProfile 返回当前登录用户的资料。
 // @Summary 获取当前用户信息
 // @Description 获取当前登录用户的详细信息
 // @Tags User
@@ -191,9 +196,9 @@ func (u *UserHandler) GetProfile(c *gin.Context) {
 	response.Success(c, user)
 }
 
-// Update
+// Update 更新当前用户资料。
 // @Summary 更新用户信息
-// @Description 更新当前用户的个人信息（头像、用户名、密码等）
+// @Description 更新当前用户的个人资料、头像和密码
 // @Tags User
 // @Accept multipart/form-data
 // @Produce json
@@ -263,6 +268,7 @@ func (u *UserHandler) Update(c *gin.Context) {
 	})
 }
 
+// handleError 统一把用户域应用错误映射成 HTTP 响应。
 func handleError(c *gin.Context, lg *zap.Logger, err error, logMsg string, start time.Time) {
 	var appErr *apperrors.Error
 	if apperrors.As(err, &appErr) {

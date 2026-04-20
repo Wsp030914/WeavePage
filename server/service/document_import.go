@@ -1,5 +1,8 @@
-package service
+﻿package service
 
+// 文件说明：这个文件实现 Markdown 分片导入。
+// 实现方式：用 Redis 保存导入会话，用对象存储保存分片和图片资源，完成时组装 Markdown 并创建正式文档。
+// 这样做的好处是大文件上传更稳，支持断点续传，也便于统一处理本地图片改写。
 import (
 	"ToDoList/server/cache"
 	"ToDoList/server/models"
@@ -162,7 +165,7 @@ type documentImportAsset struct {
 	UploadedAt   time.Time `json:"uploaded_at"`
 }
 
-// NewDocumentImportService creates a Markdown import coordinator.
+// NewDocumentImportService 创建 Markdown 导入服务。
 func NewDocumentImportService(deps DocumentImportServiceDeps) *DocumentImportService {
 	return &DocumentImportService{
 		taskSvc: deps.TaskService,
@@ -171,7 +174,8 @@ func NewDocumentImportService(deps DocumentImportServiceDeps) *DocumentImportSer
 	}
 }
 
-// CreateSession validates metadata and creates a Redis-backed import session.
+// CreateSession 校验导入元数据并创建 Redis 会话。
+// 会话里记录 total_parts、sha256 和协作模式，是为了让后续分片上传和最终组装都能按同一份元信息执行。
 func (s *DocumentImportService) CreateSession(ctx context.Context, lg *zap.Logger, uid int, in CreateDocumentImportInput) (*DocumentImportSessionResult, error) {
 	if s == nil || s.cache == nil || s.store == nil || s.taskSvc == nil {
 		return nil, apperrors.NewInternalError("document import is not configured")
@@ -260,7 +264,8 @@ func (s *DocumentImportService) CreateSession(ctx context.Context, lg *zap.Logge
 	return session.result(), nil
 }
 
-// UploadPart stores one Markdown chunk for an import session.
+// UploadPart 保存一个 Markdown 分片。
+// 这里在上传时就计算每片哈希，后续排查分片错乱时可以直接定位到具体 part。
 func (s *DocumentImportService) UploadPart(ctx context.Context, lg *zap.Logger, uid int, uploadID string, partNo int, reader io.Reader, size int64) (*DocumentImportPartResult, error) {
 	if size <= 0 {
 		return nil, apperrors.NewParamError("empty part")
@@ -324,7 +329,8 @@ func (s *DocumentImportService) UploadPart(ctx context.Context, lg *zap.Logger, 
 	return result, nil
 }
 
-// UploadAsset stores an image asset and records its original Markdown path.
+// UploadAsset 保存 Markdown 引用到的图片资源。
+// 资源和正文分开上传，是为了避免大图拖慢正文分片链路，也便于单独复用图片地址改写逻辑。
 func (s *DocumentImportService) UploadAsset(ctx context.Context, lg *zap.Logger, uid int, uploadID string, originalPath string, fh *multipart.FileHeader) (*DocumentImportAssetResult, error) {
 	if fh == nil {
 		return nil, apperrors.NewParamError("file is required")
@@ -396,7 +402,8 @@ func (s *DocumentImportService) UploadAsset(ctx context.Context, lg *zap.Logger,
 	return result, nil
 }
 
-// Complete assembles uploaded chunks, rewrites image references, and creates the document.
+// Complete 组装全部分片、改写图片引用并创建正式文档。
+// 最终仍然复用 TaskService.Create，是为了让导入文档和普通新建文档走同一套缓存、事件和协作初始化链路。
 func (s *DocumentImportService) Complete(ctx context.Context, lg *zap.Logger, uid int, uploadID string, in CompleteDocumentImportInput) (*DocumentImportCompleteResult, error) {
 	var result *DocumentImportCompleteResult
 	err := s.withSessionLock(ctx, uploadID, func() error {
@@ -455,7 +462,7 @@ func (s *DocumentImportService) Complete(ctx context.Context, lg *zap.Logger, ui
 	return result, nil
 }
 
-// Abort removes temporary objects and deletes the import session.
+// Abort 中止导入会话并清理临时对象。
 func (s *DocumentImportService) Abort(ctx context.Context, lg *zap.Logger, uid int, uploadID string) error {
 	return s.withSessionLock(ctx, uploadID, func() error {
 		session, err := s.loadSession(ctx, uid, uploadID)
@@ -471,6 +478,8 @@ func (s *DocumentImportService) Abort(ctx context.Context, lg *zap.Logger, uid i
 	})
 }
 
+// assembleMarkdown 按分片顺序拼装完整 Markdown，并计算最终摘要。
+// 这里排序 partNo 后顺序读取，是为了保证断续上传的分片最终仍能恢复成稳定的原始内容。
 func (s *DocumentImportService) assembleMarkdown(ctx context.Context, session *documentImportSession) (string, string, error) {
 	partNos := make([]int, 0, len(session.Parts))
 	for partNo := range session.Parts {
@@ -487,6 +496,7 @@ func (s *DocumentImportService) assembleMarkdown(ctx context.Context, session *d
 			return "", "", apperrors.NewInternalError("failed to read upload part")
 		}
 
+		// 这里限制剩余可读字节数，是为了在组装阶段就阻断超大文件，避免对象存储内容把内存顶爆。
 		remaining := DocumentImportMaxMarkdownSize - int64(buf.Len()) + 1
 		if remaining <= 0 {
 			_ = reader.Close()
@@ -513,6 +523,8 @@ func (s *DocumentImportService) assembleMarkdown(ctx context.Context, session *d
 	return string(contentBytes), hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+// withSessionLock 用分布式锁串行化同一个 upload_id 的操作。
+// 这样做的好处是同一导入会话的上传、完成和取消不会互相踩状态。
 func (s *DocumentImportService) withSessionLock(ctx context.Context, uploadID string, fn func() error) error {
 	if s == nil || s.cache == nil {
 		return apperrors.NewInternalError("document import is not configured")
@@ -535,6 +547,7 @@ func (s *DocumentImportService) withSessionLock(ctx context.Context, uploadID st
 	return fn()
 }
 
+// saveSession 把导入会话序列化回缓存。
 func (s *DocumentImportService) saveSession(ctx context.Context, session *documentImportSession) error {
 	data, err := json.Marshal(session)
 	if err != nil {
@@ -543,6 +556,8 @@ func (s *DocumentImportService) saveSession(ctx context.Context, session *docume
 	return s.cache.Set(ctx, documentImportSessionKey(session.UploadID), string(data), documentImportSessionTTL)
 }
 
+// loadSession 从缓存读取并校验导入会话。
+// 这里顺便补齐空 map，是为了兼容旧会话或异常数据，避免后续写入时出现 nil map panic。
 func (s *DocumentImportService) loadSession(ctx context.Context, uid int, uploadID string) (*documentImportSession, error) {
 	raw, err := s.cache.Get(ctx, documentImportSessionKey(uploadID))
 	if err != nil {
@@ -567,6 +582,7 @@ func (s *DocumentImportService) loadSession(ctx context.Context, uid int, upload
 	return &session, nil
 }
 
+// cleanupSessionParts 清理正文分片对象。
 func (s *DocumentImportService) cleanupSessionParts(ctx context.Context, lg *zap.Logger, session *documentImportSession) {
 	for _, part := range session.Parts {
 		if err := s.store.DeleteObject(ctx, part.Key); err != nil {
@@ -575,6 +591,7 @@ func (s *DocumentImportService) cleanupSessionParts(ctx context.Context, lg *zap
 	}
 }
 
+// cleanupSessionAssets 清理导入期间上传的图片资源。
 func (s *DocumentImportService) cleanupSessionAssets(ctx context.Context, lg *zap.Logger, session *documentImportSession) {
 	for _, asset := range session.Assets {
 		if err := s.store.DeleteObject(ctx, asset.Key); err != nil {
@@ -583,6 +600,7 @@ func (s *DocumentImportService) cleanupSessionAssets(ctx context.Context, lg *za
 	}
 }
 
+// result 把内部会话结构转成接口返回模型。
 func (session *documentImportSession) result() *DocumentImportSessionResult {
 	return &DocumentImportSessionResult{
 		UploadID:          session.UploadID,
@@ -597,6 +615,7 @@ func (session *documentImportSession) result() *DocumentImportSessionResult {
 	}
 }
 
+// assetResults 返回排序后的资源结果列表，保证同一个会话多次读取时顺序稳定。
 func (session *documentImportSession) assetResults(uploadID string) []DocumentImportAssetResult {
 	if len(session.Assets) == 0 {
 		return nil
@@ -619,6 +638,8 @@ func (session *documentImportSession) assetResults(uploadID string) []DocumentIm
 	return results
 }
 
+// rewriteMarkdownImageRefs 把 Markdown 或 HTML 中的本地图片引用改写成上传后的远端地址。
+// 同时支持两种语法，是为了兼容用户从不同编辑器导出的 Markdown。
 func rewriteMarkdownImageRefs(content string, assets map[string]documentImportAsset) (string, int) {
 	if len(assets) == 0 || content == "" {
 		return content, 0
@@ -663,6 +684,8 @@ func rewriteMarkdownImageRefs(content string, assets map[string]documentImportAs
 	return content, rewrittenCount
 }
 
+// buildAssetLookup 构建资源路径查找表。
+// 这里既记录规范化路径，也尝试记录 basename，是为了兼容部分编辑器在导出时丢失目录层级的情况。
 func buildAssetLookup(assets map[string]documentImportAsset) map[string]string {
 	lookup := make(map[string]string, len(assets)*2)
 	for _, asset := range assets {
@@ -730,6 +753,7 @@ func isHexSHA256(value string) bool {
 	return true
 }
 
+// normalizeAssetPath 规范化资源路径并拒绝目录穿越。
 func normalizeAssetPath(value string) string {
 	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
 	value = strings.TrimPrefix(value, "./")

@@ -1,5 +1,8 @@
 package realtime
 
+// 文件说明：这个文件实现项目级实时协同 hub。
+// 实现方式：按项目维度管理连接、在线态、锁广播与 Redis Pub/Sub fan-out。
+// 这样做的好处是项目级实时事件、presence 和锁状态可以在多实例之间一致传播。
 import (
 	"ToDoList/server/cache"
 	"ToDoList/server/models"
@@ -33,21 +36,25 @@ type ProjectHub struct {
 	nodeID string
 
 	lockManager *ProjectLockManager
+	metrics     realtimeCounters
 
 	mu    sync.RWMutex
 	rooms map[int]map[*projectClient]struct{}
 }
 
 type projectClient struct {
-	hub     *ProjectHub
-	conn    *websocket.Conn
-	session service.ProjectRealtimeSession
-	send    chan ProjectServerMessage
-	lg      *zap.Logger
-	sendMu  sync.Mutex
-	closed  bool
+	hub           *ProjectHub
+	conn          *websocket.Conn
+	session       service.ProjectRealtimeSession
+	send          chan ProjectServerMessage
+	lg            *zap.Logger
+	sendMu        sync.Mutex
+	closed        bool
+	viewingTaskID int
 }
 
+// NewProjectHub 创建项目级实时 hub。
+// 这里按 project 维度管理房间，是因为任务事件、presence 和元数据锁天然都归属于项目作用域。
 func NewProjectHub(svc *service.TaskService, rdb *redis.Client, nodeID string, lockCache cache.Cache) *ProjectHub {
 	return &ProjectHub{
 		svc:         svc,
@@ -58,6 +65,8 @@ func NewProjectHub(svc *service.TaskService, rdb *redis.Client, nodeID string, l
 	}
 }
 
+// Start 启动 Redis 订阅和 presence 心跳两个后台循环。
+// 一个负责跨节点转发项目事件，一个负责周期性广播在线快照。
 func (h *ProjectHub) Start(ctx context.Context, lg *zap.Logger) {
 	if h == nil || h.rdb == nil {
 		return
@@ -67,6 +76,7 @@ func (h *ProjectHub) Start(ctx context.Context, lg *zap.Logger) {
 	go h.runPresenceHeartbeat(ctx, lg)
 }
 
+// HandleProjectConnection 把一个客户端接入项目房间，并在连接生命周期内维护 presence 与锁释放。
 func (h *ProjectHub) HandleProjectConnection(ctx context.Context, conn *websocket.Conn, session service.ProjectRealtimeSession, initialCursor int64, lg *zap.Logger) {
 	client := &projectClient{
 		hub:     h,
@@ -89,6 +99,8 @@ func (h *ProjectHub) HandleProjectConnection(ctx context.Context, conn *websocke
 	client.readPump(ctx)
 }
 
+// BroadcastTaskEvent 既广播给当前节点的本地连接，也会投递到 Redis 供其他节点转发。
+// 这样做的好处是“实时广播”和“多节点 fan-out”共用同一条入口。
 func (h *ProjectHub) BroadcastTaskEvent(ctx context.Context, event models.TaskEvent) {
 	if event.ProjectID <= 0 {
 		return
@@ -109,6 +121,7 @@ func (h *ProjectHub) register(client *projectClient) {
 		h.rooms[client.session.ProjectID] = room
 	}
 	room[client] = struct{}{}
+	h.metrics.connectionsAccepted.Add(1)
 }
 
 func (h *ProjectHub) unregister(client *projectClient) {
@@ -127,9 +140,50 @@ func (h *ProjectHub) unregister(client *projectClient) {
 	if !client.closed {
 		client.closed = true
 		close(client.send)
+		h.metrics.connectionsClosed.Add(1)
 	}
 }
 
+func (h *ProjectHub) MetricsSnapshot() HubMetrics {
+	if h == nil {
+		return HubMetrics{Hub: "project"}
+	}
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	rooms := make([]RoomMetrics, 0, len(h.rooms))
+	totalConnections := 0
+	globalUsers := make(map[int]struct{})
+	for projectID, room := range h.rooms {
+		roomUsers := make(map[int]struct{})
+		for client := range room {
+			totalConnections++
+			roomUsers[client.session.UserID] = struct{}{}
+			globalUsers[client.session.UserID] = struct{}{}
+		}
+		rooms = append(rooms, RoomMetrics{
+			ID:          projectID,
+			Connections: len(room),
+			Users:       len(roomUsers),
+		})
+	}
+	sort.Slice(rooms, func(i, j int) bool {
+		return rooms[i].ID < rooms[j].ID
+	})
+
+	return HubMetrics{
+		NodeID:            h.nodeID,
+		Hub:               "project",
+		ActiveRooms:       len(h.rooms),
+		ActiveConnections: totalConnections,
+		ActiveUsers:       len(globalUsers),
+		Rooms:             rooms,
+		Counters:          h.metrics.snapshot(),
+	}
+}
+
+// presenceSnapshot 汇总某个项目房间当前所有连接，折叠成按用户维度聚合的在线快照。
 func (h *ProjectHub) presenceSnapshot(projectID int) []ProjectPresence {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -150,6 +204,10 @@ func (h *ProjectHub) presenceSnapshot(projectID int) []ProjectPresence {
 			byUserID[client.session.UserID] = item
 		}
 		item.Connections++
+		if client.viewingTaskID > 0 && !intSliceContains(item.ViewingTaskIDs, client.viewingTaskID) {
+			item.ViewingTaskIDs = append(item.ViewingTaskIDs, client.viewingTaskID)
+			sort.Ints(item.ViewingTaskIDs)
+		}
 		if item.Username == "" {
 			item.Username = client.session.Username
 		}
@@ -177,6 +235,8 @@ func (h *ProjectHub) activeProjectIDs() []int {
 	return ids
 }
 
+// broadcastPresence 生成并广播 presence 快照。
+// 使用快照而不是增量事件，可以让新旧客户端都更容易做状态收敛。
 func (h *ProjectHub) broadcastPresence(ctx context.Context, projectID int, lg *zap.Logger) {
 	msg := ProjectServerMessage{
 		Type:         ProjectMessageTypePresence,
@@ -188,6 +248,8 @@ func (h *ProjectHub) broadcastPresence(ctx context.Context, projectID int, lg *z
 	h.publish(ctx, projectID, msg, lg)
 }
 
+// runPresenceHeartbeat 周期性给所有活跃项目广播在线快照。
+// 即使没有新的业务事件，客户端也能靠心跳快照修正在线态。
 func (h *ProjectHub) runPresenceHeartbeat(ctx context.Context, lg *zap.Logger) {
 	ticker := time.NewTicker(projectPresencePeriod)
 	defer ticker.Stop()
@@ -204,14 +266,17 @@ func (h *ProjectHub) runPresenceHeartbeat(ctx context.Context, lg *zap.Logger) {
 	}
 }
 
+// broadcast 只向同一项目房间里的本地连接广播消息。
 func (h *ProjectHub) broadcast(projectID int, msg ProjectServerMessage) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	h.metrics.broadcastMessages.Add(1)
 	for client := range h.rooms[projectID] {
 		select {
 		case client.send <- msg:
 		default:
+			h.metrics.droppedClients.Add(1)
 			go h.unregister(client)
 		}
 	}
@@ -232,8 +297,11 @@ func (h *ProjectHub) publish(ctx context.Context, projectID int, msg ProjectServ
 		return
 	}
 	if err := h.rdb.Publish(ctx, projectPubSubChannel, payload).Err(); err != nil {
+		h.metrics.pubSubPublishErrors.Add(1)
 		lg.Warn("project.pubsub.publish_failed", zap.Int("project_id", projectID), zap.Error(err))
+		return
 	}
+	h.metrics.pubSubPublished.Add(1)
 }
 
 func (h *ProjectHub) runPubSub(ctx context.Context, lg *zap.Logger) {
@@ -257,6 +325,7 @@ func (h *ProjectHub) runPubSub(ctx context.Context, lg *zap.Logger) {
 			if env.OriginNodeID == h.nodeID {
 				continue
 			}
+			h.metrics.pubSubReceived.Add(1)
 			h.broadcast(env.ProjectID, env.Message)
 		}
 	}
@@ -321,12 +390,28 @@ func (c *projectClient) handleMessage(ctx context.Context, msg ProjectClientMess
 	case ProjectMessageTypeSync:
 		c.sendSync(ctx, msg.Cursor)
 	case ProjectMessageTypeLockRequest:
+		c.hub.metrics.lockRequests.Add(1)
 		c.handleLockRequest(ctx, msg)
 	case ProjectMessageTypeLockRelease:
 		c.handleLockRelease(ctx, msg)
+	case ProjectMessageTypeViewDocument:
+		c.setViewingTask(ctx, msg.TaskID)
 	default:
 		c.sendError(fmt.Sprintf("unsupported message type: %s", msg.Type))
 	}
+}
+
+func (c *projectClient) setViewingTask(ctx context.Context, taskID int) {
+	if taskID > 0 {
+		if err := c.ensureCanLockTask(ctx, taskID); err != nil {
+			c.sendError(err.Error())
+			return
+		}
+	}
+	c.hub.mu.Lock()
+	c.viewingTaskID = taskID
+	c.hub.mu.Unlock()
+	c.hub.broadcastPresence(ctx, c.session.ProjectID, c.lg)
 }
 
 func (c *projectClient) handleLockRequest(ctx context.Context, msg ProjectClientMessage) {
@@ -391,6 +476,7 @@ func (c *projectClient) broadcastLock(msg ProjectServerMessage) {
 }
 
 func (c *projectClient) sendLockError(taskID int, field string, message string) {
+	c.hub.metrics.lockErrors.Add(1)
 	c.enqueue(ProjectServerMessage{
 		Type:      ProjectMessageTypeLockError,
 		ProjectID: c.session.ProjectID,
@@ -444,6 +530,15 @@ func (c *projectClient) sendError(message string) {
 		ProjectID: c.session.ProjectID,
 		Error:     message,
 	})
+}
+
+func intSliceContains(values []int, target int) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func taskEventServerMessage(event models.TaskEvent, nodeID string) ProjectServerMessage {

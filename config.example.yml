@@ -1,0 +1,83 @@
+server:
+  port: 8080
+  mode: debug
+
+mysql:
+  path: 127.0.0.1
+  port: 3306
+  db-name: todolist
+  username: root
+  password: your_mysql_password
+  max-idle-conns: 10
+  max-open-conns: 100
+  conn-max-idle-time: 30m
+  conn-max-lifetime: 1h
+  config: charset=utf8mb4&parseTime=True&loc=Local
+
+redis:
+  addr: 127.0.0.1:6379
+  password: ""
+  db: 0
+
+zap:
+  prefix: todolist
+  timeFormat: "2006-01-02 15:04:05"
+  level: info
+  caller: true
+  stackTrace: false
+  writer: file
+  encode: console
+  logFile:
+    maxSize: 20
+    backups: 5
+    compress: false
+    output:
+      - server-info.log
+    errput:
+      - server-error.log
+
+jwt:
+  secret: dev-only-secret-please-change-me-32bytes-min!
+  issuer: todo-api
+  audience: todo-frontend
+  access-ttl: 24h
+
+cos:
+  secret-id: your_tencent_cos_secret_id
+  secret-key: your_tencent_cos_secret_key
+  bucket: your_bucket_name
+  region: ap-shanghai
+
+kafka:
+  enable: true
+  brokers:
+    - 127.0.0.1:9092
+  topic: todo-events
+  dlq-topic: todo-events-dlq
+  group-id: todo-server
+  workers: 4
+
+due-scheduler:
+  local-polling-enabled: true
+  schedule-url: http://127.0.0.1:9090/api/v1/jobs/once
+  cancel-url: http://127.0.0.1:9090/api/v1/jobs/cancel
+  callback-url: http://127.0.0.1:8080/api/internal/scheduler/task-due
+  callback-token: dev-scheduler-callback-token
+  request-timeout: 3s
+  ping-url: http://127.0.0.1:9090/health
+
+email:
+  host: smtp.example.com
+  port: 587
+  username: your_email_username
+  password: your_email_password
+  from: noreply@example.com
+
+ai:
+  provider: openai
+  api-key: ""
+  base-url: https://api.openai.com/v1
+  model: ""
+  timeout: 90s
+  max-input-chars: 24000
+  max-completion-tokens: 1600

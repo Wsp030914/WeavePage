@@ -1,9 +1,15 @@
-package cache
+﻿package cache
 
+// 文件说明：这个文件负责某类缓存或锁能力封装。
+// 实现方式：统一封装缓存键与读写语义。
+// 这样做的好处是缓存行为更一致，也更方便测试。
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
+	"strconv"
+	"strings"
 	"time"
 
 	"ToDoList/server/models"
@@ -12,8 +18,9 @@ import (
 )
 
 const (
-	ProjectCacheExpire = 10 * time.Minute
-	ProjectListExpire  = 30 * time.Minute
+	ProjectCacheExpire   = 10 * time.Minute
+	ProjectListExpire    = 30 * time.Minute
+	ProjectSummaryExpire = 15 * time.Minute
 )
 
 type ProjectCache interface {
@@ -27,6 +34,10 @@ type ProjectCache interface {
 	CountProjectIDs(ctx context.Context, uid int) (int64, error)
 	AddProjectID(ctx context.Context, uid int, pid int, score float64) error
 	RemProjectID(ctx context.Context, uid, pid int) error
+	GetSummaryVersion(ctx context.Context, uid int) (int64, error)
+	BumpSummaryVersion(ctx context.Context, uid int) (int64, error)
+	GetSummary(ctx context.Context, uid int, ver int64, name string, page, size int) (*models.ProjectSummaryCache, error)
+	SetSummary(ctx context.Context, summary models.ProjectSummaryCache) error
 }
 
 type projectCache struct {
@@ -145,6 +156,16 @@ func (c *projectCache) zsetKey(uid int) string {
 	return fmt.Sprintf("project:zset:%d", uid)
 }
 
+func (c *projectCache) summaryVersionKey(uid int) string {
+	return fmt.Sprintf("project:summary:version:%d", uid)
+}
+
+func (c *projectCache) summaryKey(uid int, ver int64, name string, page, size int) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(strings.TrimSpace(name)))
+	return fmt.Sprintf("project:summary:%d:%d:%08x:%d:%d", uid, ver, h.Sum32(), page, size)
+}
+
 func (c *projectCache) SetProjectIDs(ctx context.Context, uid int, items []models.ProjectIDScore) error {
 	key := c.zsetKey(uid)
 	members := make([]redis.Z, len(items))
@@ -225,4 +246,44 @@ func (c *projectCache) AddProjectID(ctx context.Context, uid int, pid int, score
 func (c *projectCache) RemProjectID(ctx context.Context, uid, pid int) error {
 	key := c.zsetKey(uid)
 	return c.cache.ZRem(ctx, key, pid)
+}
+
+func (c *projectCache) GetSummaryVersion(ctx context.Context, uid int) (int64, error) {
+	raw, err := c.cache.Get(ctx, c.summaryVersionKey(uid))
+	if err != nil {
+		if err == ErrCacheMiss {
+			return 0, nil
+		}
+		return 0, err
+	}
+	ver, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return ver, nil
+}
+
+func (c *projectCache) BumpSummaryVersion(ctx context.Context, uid int) (int64, error) {
+	ver := time.Now().UnixNano()
+	return ver, c.cache.Set(ctx, c.summaryVersionKey(uid), strconv.FormatInt(ver, 10), ProjectListExpire)
+}
+
+func (c *projectCache) GetSummary(ctx context.Context, uid int, ver int64, name string, page, size int) (*models.ProjectSummaryCache, error) {
+	raw, err := c.cache.Get(ctx, c.summaryKey(uid, ver, name, page, size))
+	if err != nil {
+		return nil, err
+	}
+	var summary models.ProjectSummaryCache
+	if err := json.Unmarshal([]byte(raw), &summary); err != nil {
+		return nil, err
+	}
+	return &summary, nil
+}
+
+func (c *projectCache) SetSummary(ctx context.Context, summary models.ProjectSummaryCache) error {
+	raw, err := json.Marshal(summary)
+	if err != nil {
+		return err
+	}
+	return c.cache.Set(ctx, c.summaryKey(summary.UID, summary.Ver, summary.Name, summary.Page, summary.Size), string(raw), ProjectSummaryExpire)
 }

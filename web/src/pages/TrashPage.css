@@ -1,0 +1,76 @@
+.yq-trash-page {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.yq-trash-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+}
+
+.yq-trash-card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px;
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    background: var(--color-bg-surface);
+    box-shadow: var(--shadow-sm);
+}
+
+.yq-trash-card-header {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.yq-trash-title-wrap {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.yq-trash-title {
+    font-size: 16px;
+    line-height: 1.4;
+    color: var(--color-text-primary);
+    word-break: break-word;
+}
+
+.yq-trash-type,
+.yq-trash-project {
+    color: var(--color-text-tertiary);
+    font-size: 12px;
+}
+
+.yq-trash-type {
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: var(--color-bg-surface-2);
+    border: 1px solid var(--color-border-soft);
+    white-space: nowrap;
+}
+
+.yq-trash-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--color-text-secondary);
+    font-size: 13px;
+}
+
+.yq-trash-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+    .yq-trash-actions {
+        flex-direction: column;
+    }
+}

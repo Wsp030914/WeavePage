@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { markdown } from '@codemirror/lang-markdown';
 import { basicSetup, EditorView } from 'codemirror';
 import './DocumentMarkdownEditor.css';
@@ -47,11 +47,23 @@ export default function DocumentMarkdownEditor({
     value = '',
     onChange,
     collaborative = true,
+    onSelectionChange,
+    command = null,
 }) {
     const hostRef = useRef(null);
     const viewRef = useRef(null);
     const applyingRemoteRef = useRef(false);
     const initialValueRef = useRef(value);
+    const lastCommandIDRef = useRef('');
+
+    const emitSelection = useCallback((view) => {
+        const range = view.state.selection.main;
+        onSelectionChange?.({
+            from: range.from,
+            to: range.to,
+            text: view.state.sliceDoc(range.from, range.to),
+        });
+    }, [onSelectionChange]);
 
     useEffect(() => {
         if (!hostRef.current) return undefined;
@@ -65,12 +77,17 @@ export default function DocumentMarkdownEditor({
                     markdown(),
                     EditorView.lineWrapping,
                     EditorView.updateListener.of((update) => {
-                        if (!update.docChanged) return;
-                        onChange?.(update.state.doc.toString());
+                        if (update.docChanged) {
+                            onChange?.(update.state.doc.toString());
+                        }
+                        if (update.docChanged || update.selectionSet) {
+                            emitSelection(update.view);
+                        }
                     }),
                 ],
             });
             viewRef.current = view;
+            emitSelection(view);
 
             return () => {
                 view.destroy();
@@ -97,9 +114,15 @@ export default function DocumentMarkdownEditor({
                         applyEditorChangesToYText(yText, update.changes);
                     }, 'codemirror-editor');
                 }),
+                EditorView.updateListener.of((update) => {
+                    if (update.docChanged || update.selectionSet) {
+                        emitSelection(update.view);
+                    }
+                }),
             ],
         });
         viewRef.current = view;
+        emitSelection(view);
 
         const observer = (event) => {
             const changes = yEventToEditorChanges(event);
@@ -115,6 +138,7 @@ export default function DocumentMarkdownEditor({
                 applyingRemoteRef.current = false;
             }
             onChange?.(yText.toString());
+            emitSelection(view);
         };
 
         yText.observe(observer);
@@ -127,7 +151,40 @@ export default function DocumentMarkdownEditor({
                 viewRef.current = null;
             }
         };
-    }, [provider, onChange, collaborative]);
+    }, [provider, onChange, collaborative, emitSelection]);
+
+    useEffect(() => {
+        if (!command || !command.id || lastCommandIDRef.current === command.id) return;
+        const view = viewRef.current;
+        if (!view) return;
+
+        const selection = view.state.selection.main;
+        let from = typeof command.from === 'number' ? command.from : selection.from;
+        let to = typeof command.to === 'number' ? command.to : selection.to;
+        const docLength = view.state.doc.length;
+        from = Math.max(0, Math.min(from, docLength));
+        to = Math.max(from, Math.min(to, docLength));
+
+        if (command.type === 'replace_all') {
+            view.dispatch({
+                changes: { from: 0, to: docLength, insert: command.text || '' },
+                selection: { anchor: String(command.text || '').length },
+            });
+        } else if (command.type === 'replace_selection') {
+            view.dispatch({
+                changes: { from, to, insert: command.text || '' },
+                selection: { anchor: from + String(command.text || '').length },
+            });
+        } else if (command.type === 'insert_after_selection') {
+            view.dispatch({
+                changes: { from: to, to, insert: command.text || '' },
+                selection: { anchor: to + String(command.text || '').length },
+            });
+        }
+
+        emitSelection(view);
+        lastCommandIDRef.current = command.id;
+    }, [command, emitSelection]);
 
     if (collaborative && !provider) {
         return (

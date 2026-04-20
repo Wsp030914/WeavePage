@@ -14,6 +14,7 @@ import {
 import { splitTasksByLifecycle } from '../utils/taskExpiration';
 import { filterTasksByDueRange } from '../utils/taskDueRange';
 import { addShanghaiDays, endOfShanghaiDay, startOfShanghaiDay } from '../utils/shanghaiTime';
+import { isTodoTask } from '../utils/taskTypes';
 import './ProjectDetailPage.css';
 
 function getNext7DayRange() {
@@ -38,11 +39,11 @@ export default function Next7DaysPage() {
         try {
             const { start, end } = getNext7DayRange();
             const allTasks = await getTasksAcrossProjects(projects.map((project) => project.id), 100);
-            const list = filterTasksByDueRange(allTasks, start, end);
+            const list = filterTasksByDueRange(allTasks.filter(isTodoTask), start, end);
             setTasks(list);
             setError('');
         } catch (err) {
-            setError(err.message || 'Failed to load tasks');
+            setError(err.message || 'Failed to load todos');
         } finally {
             setLoading(false);
         }
@@ -54,7 +55,7 @@ export default function Next7DaysPage() {
 
     const isTaskVisible = useCallback((task) => {
         const { start, end } = getNext7DayRange();
-        return filterTasksByDueRange([task], start, end).length > 0;
+        return isTodoTask(task) && filterTasksByDueRange([task], start, end).length > 0;
     }, []);
 
     const patchTask = useCallback((task) => {
@@ -74,19 +75,19 @@ export default function Next7DaysPage() {
             const updatedTask = await updateTask(task.project_id, task.id, { status: nextStatus }, task.version);
             patchTask(updatedTask || optimisticTaskUpdate(task, { status: nextStatus }));
         } catch (err) {
-            alert(err.message || 'Failed to update task');
+            alert(err.message || 'Failed to update todo');
             await loadTasks();
         }
     };
 
     const onDeleteTask = async (task) => {
-        if (!window.confirm(`Delete task "${task.title}"?`)) return;
+        if (!window.confirm(`Move todo "${task.title}" to trash?`)) return;
         try {
             await deleteTask(task.id);
             setTasks((prev) => removeTask(prev, task.id));
             setSelectedTask((prev) => (prev?.id === task.id ? null : prev));
         } catch (err) {
-            alert(err.message || 'Failed to delete task');
+            alert(err.message || 'Failed to move todo to trash');
             await loadTasks();
         }
     };
@@ -115,7 +116,7 @@ export default function Next7DaysPage() {
             <div className="yq-page-header yq-board-header">
                 <div>
                     <span className="yq-kicker">Todos</span>
-                    <h1>未来 7 天</h1>
+                    <h1>Next 7 Days</h1>
                 </div>
                 <div className="yq-board-tools">
                     <Button variant="secondary" onClick={loadTasks}>Refresh</Button>
@@ -123,9 +124,9 @@ export default function Next7DaysPage() {
             </div>
 
             <TaskSection
-                title="Expired"
+                title="Overdue"
                 tasks={expiredTasks}
-                emptyText="No expired tasks in this range."
+                emptyText="No overdue todos in this range."
                 onToggleStatus={onToggleTask}
                 onOpenDetails={setSelectedTask}
                 onDeleteTask={onDeleteTask}
@@ -133,13 +134,17 @@ export default function Next7DaysPage() {
                 completeLabel="Done"
                 restoreLabel="Undo"
                 projectLabel="Space"
-                detailsLabel="Details"
+                detailsLabel="Open"
+                completeAriaLabel="Mark todo as done"
+                restoreAriaLabel="Reopen todo"
+                expiredLabel="Overdue"
+                dueLabel="Reminder"
             />
 
             <TaskSection
                 title="Open"
                 tasks={todoTasks}
-                emptyText="No upcoming tasks in the next 7 days."
+                emptyText="No upcoming todos in the next 7 days."
                 onToggleStatus={onToggleTask}
                 onOpenDetails={setSelectedTask}
                 onDeleteTask={onDeleteTask}
@@ -147,13 +152,17 @@ export default function Next7DaysPage() {
                 completeLabel="Done"
                 restoreLabel="Undo"
                 projectLabel="Space"
-                detailsLabel="Details"
+                detailsLabel="Open"
+                completeAriaLabel="Mark todo as done"
+                restoreAriaLabel="Reopen todo"
+                expiredLabel="Overdue"
+                dueLabel="Reminder"
             />
 
             <TaskSection
                 title="Completed"
                 tasks={doneTasks}
-                emptyText="No completed upcoming tasks."
+                emptyText="No completed todos in this range."
                 onToggleStatus={onToggleTask}
                 onOpenDetails={setSelectedTask}
                 onDeleteTask={onDeleteTask}
@@ -161,7 +170,11 @@ export default function Next7DaysPage() {
                 completeLabel="Done"
                 restoreLabel="Undo"
                 projectLabel="Space"
-                detailsLabel="Details"
+                detailsLabel="Open"
+                completeAriaLabel="Mark todo as done"
+                restoreAriaLabel="Reopen todo"
+                expiredLabel="Overdue"
+                dueLabel="Reminder"
             />
 
             <TaskDetailPanel

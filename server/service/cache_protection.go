@@ -1,5 +1,8 @@
-package service
+﻿package service
 
+// 文件说明：这个文件负责某类业务编排逻辑。
+// 实现方式：服务层组合 repo、cache、bus 与外部依赖完成业务闭环。
+// 这样做的好处是复杂规则集中，跨层协作边界清晰。
 import (
 	"context"
 	"fmt"

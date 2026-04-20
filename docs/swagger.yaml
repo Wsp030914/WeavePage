@@ -40,6 +40,15 @@ definitions:
     - project_id
     - total_size
     type: object
+  handler.CreateMeetingActionTodoReq:
+    properties:
+      due_at:
+        type: string
+      title:
+        type: string
+    required:
+    - title
+    type: object
   handler.CreateMeetingReq:
     properties:
       project_id:
@@ -57,6 +66,17 @@ definitions:
         type: string
     required:
     - name
+    type: object
+  handler.CreateTaskCommentReq:
+    properties:
+      anchor_text:
+        type: string
+      anchor_type:
+        type: string
+      content_md:
+        type: string
+    required:
+    - content_md
     type: object
   handler.CreateTaskReq:
     properties:
@@ -106,6 +126,15 @@ definitions:
     - password
     - username
     type: object
+  handler.RealtimeMetricsResponse:
+    properties:
+      collected_at:
+        type: string
+      content:
+        $ref: '#/definitions/realtime.HubMetrics'
+      project:
+        $ref: '#/definitions/realtime.HubMetrics'
+    type: object
   handler.RemoveMemberReq:
     properties:
       user_id:
@@ -131,6 +160,11 @@ definitions:
         type: string
       sort_order:
         type: integer
+    type: object
+  handler.UpdateTaskCommentReq:
+    properties:
+      resolved:
+        type: boolean
     type: object
   handler.UpdateTaskReq:
     properties:
@@ -159,6 +193,13 @@ definitions:
         type: string
       created_at:
         type: string
+      deleted_at:
+        format: date-time
+        type: string
+      deleted_by:
+        type: integer
+      deleted_name:
+        type: string
       id:
         type: integer
       name:
@@ -177,6 +218,13 @@ definitions:
       content_md:
         type: string
       created_at:
+        type: string
+      deleted_at:
+        format: date-time
+        type: string
+      deleted_by:
+        type: integer
+      deleted_title:
         type: string
       doc_type:
         type: string
@@ -205,6 +253,35 @@ definitions:
       user_id:
         type: integer
       version:
+        type: integer
+    type: object
+  models.TaskCommentInfo:
+    properties:
+      anchor_text:
+        type: string
+      anchor_type:
+        type: string
+      content_md:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      project_id:
+        type: integer
+      resolved:
+        type: boolean
+      resolved_at:
+        type: string
+      resolved_by:
+        type: integer
+      task_id:
+        type: integer
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/models.UserInfo'
+      user_id:
         type: integer
     type: object
   models.TaskEvent:
@@ -263,102 +340,58 @@ definitions:
       username:
         type: string
     type: object
-  realtime.ContentServerMessage:
+  realtime.HubMetrics:
     properties:
-      actor_id:
+      active_connections:
         type: integer
-      duplicate:
-        type: boolean
-      error:
-        type: string
-      has_more:
-        type: boolean
-      message_id:
-        type: string
-      next_cursor:
+      active_rooms:
         type: integer
-      server_node_id:
-        type: string
-      task_id:
+      active_users:
         type: integer
-      type:
+      counters:
+        $ref: '#/definitions/realtime.RealtimeCounters'
+      hub:
         type: string
-      update:
+      node_id:
+        type: string
+      rooms:
         items:
-          type: integer
-        type: array
-      update_id:
-        type: integer
-      updates:
-        items:
-          $ref: '#/definitions/realtime.ContentUpdateItem'
+          $ref: '#/definitions/realtime.RoomMetrics'
         type: array
     type: object
-  realtime.ContentUpdateItem:
+  realtime.RealtimeCounters:
     properties:
-      actor_id:
+      broadcast_messages:
         type: integer
-      id:
+      connections_accepted:
         type: integer
-      message_id:
-        type: string
-      task_id:
+      connections_closed:
         type: integer
-      update:
-        items:
-          type: integer
-        type: array
+      content_updates:
+        type: integer
+      dropped_clients:
+        type: integer
+      duplicate_updates:
+        type: integer
+      lock_errors:
+        type: integer
+      lock_requests:
+        type: integer
+      pubsub_publish_errors:
+        type: integer
+      pubsub_published:
+        type: integer
+      pubsub_received:
+        type: integer
     type: object
-  realtime.ProjectLock:
-    properties:
-      field:
-        type: string
-      holder_user_id:
-        type: integer
-      holder_username:
-        type: string
-      task_id:
-        type: integer
-    type: object
-  realtime.ProjectPresence:
+  realtime.RoomMetrics:
     properties:
       connections:
         type: integer
-      user_id:
+      id:
         type: integer
-      username:
-        type: string
-    type: object
-  realtime.ProjectServerMessage:
-    properties:
-      cursor:
+      users:
         type: integer
-      error:
-        type: string
-      event:
-        $ref: '#/definitions/models.TaskEvent'
-      event_id:
-        type: string
-      events:
-        items:
-          $ref: '#/definitions/models.TaskEvent'
-        type: array
-      has_more:
-        type: boolean
-      lock:
-        $ref: '#/definitions/realtime.ProjectLock'
-      next_cursor:
-        type: integer
-      presence:
-        items:
-          $ref: '#/definitions/realtime.ProjectPresence'
-        type: array
-      project_id:
-        type: integer
-      server_node_id:
-        type: string
-      type:
-        type: string
     type: object
   response.PageResult:
     properties:
@@ -459,6 +492,17 @@ definitions:
       task:
         $ref: '#/definitions/models.Task'
     type: object
+  service.ProjectActivityResult:
+    properties:
+      activities:
+        items:
+          $ref: '#/definitions/service.TaskActivityEntry'
+        type: array
+      has_more:
+        type: boolean
+      next_cursor:
+        type: integer
+    type: object
   service.ProjectSyncResult:
     properties:
       events:
@@ -468,6 +512,31 @@ definitions:
       has_more:
         type: boolean
       next_cursor:
+        type: integer
+    type: object
+  service.TaskActivityEntry:
+    properties:
+      activity_type:
+        type: string
+      actor_id:
+        type: integer
+      created_at:
+        type: string
+      event_id:
+        type: string
+      event_type:
+        type: string
+      id:
+        type: integer
+      project_id:
+        type: integer
+      summary:
+        type: string
+      task:
+        $ref: '#/definitions/models.Task'
+      task_id:
+        type: integer
+      task_version:
         type: integer
     type: object
   service.TaskListResult:
@@ -480,6 +549,22 @@ definitions:
         format: int64
         type: integer
     type: object
+  service.TrashRestoreResult:
+    properties:
+      task:
+        $ref: '#/definitions/models.Task'
+    type: object
+  service.WorkspaceSearchResult:
+    properties:
+      documents:
+        items:
+          $ref: '#/definitions/models.Task'
+        type: array
+      spaces:
+        items:
+          $ref: '#/definitions/models.Project'
+        type: array
+    type: object
 info:
   contact: {}
 paths:
@@ -487,7 +572,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 内部调度器回调接口，用于触发任务到期通知
+      description: 调度器内部回调接口，用于触发任务到期通知
       parameters:
       - description: 调度令牌
         in: header
@@ -514,6 +599,108 @@ paths:
       summary: 任务到期回调
       tags:
       - Internal
+  /comments/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Deletes a comment. The author and document owners/editors can delete
+        comments.
+      parameters:
+      - description: Comment ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Deleted
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "404":
+          description: Comment not found
+          schema:
+            $ref: '#/definitions/response.Resp'
+      security:
+      - BearerAuth: []
+      summary: Delete a comment
+      tags:
+      - Comment
+    patch:
+      consumes:
+      - application/json
+      description: Updates comment state such as resolved/unresolved. Authors and
+        document owners/editors can resolve comments.
+      parameters:
+      - description: Comment ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Comment patch
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/handler.UpdateTaskCommentReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/models.TaskCommentInfo'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "404":
+          description: Comment not found
+          schema:
+            $ref: '#/definitions/response.Resp'
+      security:
+      - BearerAuth: []
+      summary: Update a comment state
+      tags:
+      - Comment
+  /diary/{date}:
+    post:
+      consumes:
+      - application/json
+      description: 查找或创建当前用户指定日期 YYYY-MM-DD.md 私人文档。
+      parameters:
+      - description: YYYY-MM-DD
+        in: path
+        name: date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 打开成功
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.DiaryTodayResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 打开或创建指定日期日记
+      tags:
+      - Diary
   /diary/today:
     post:
       consumes:
@@ -544,6 +731,87 @@ paths:
       summary: 打开或创建今日日记
       tags:
       - Diary
+  /documents/{id}/comments:
+    get:
+      consumes:
+      - application/json
+      description: Returns document-level comments for a document, meeting note, or
+        todo. Diary documents are rejected.
+      parameters:
+      - description: Document ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Comments
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/models.TaskCommentInfo'
+                  type: array
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "404":
+          description: Document not found
+          schema:
+            $ref: '#/definitions/response.Resp'
+      security:
+      - BearerAuth: []
+      summary: List document comments
+      tags:
+      - Comment
+    post:
+      consumes:
+      - application/json
+      description: Creates a document-level comment for a document, meeting note,
+        or todo. Diary documents are rejected.
+      parameters:
+      - description: Document ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Comment payload
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateTaskCommentReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/models.TaskCommentInfo'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "404":
+          description: Document not found
+          schema:
+            $ref: '#/definitions/response.Resp'
+      security:
+      - BearerAuth: []
+      summary: Create a document comment
+      tags:
+      - Comment
   /documents/{id}/content:
     patch:
       consumes:
@@ -820,7 +1088,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 使用用户名和密码登录
+      description: 使用用户名或邮箱和密码登录
       parameters:
       - description: 登录信息
         in: body
@@ -909,11 +1177,45 @@ paths:
       summary: 新建会议纪要
       tags:
       - Meeting
+  /meetings/{id}/actions:
+    post:
+      consumes:
+      - application/json
+      description: Creates a lightweight todo in the same space as the meeting note.
+      parameters:
+      - description: Meeting document ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Action item
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateMeetingActionTodoReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/models.Task'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create todo from meeting action
+      tags:
+      - Meeting
   /projects:
     get:
       consumes:
       - application/json
-      description: 获取项目列表，支持按名称搜索
+      description: 获取项目列表，并支持按名称搜索
       parameters:
       - description: 项目名称
         in: query
@@ -947,7 +1249,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 创建新的项目
+      description: 创建新的项目空间
       parameters:
       - description: 项目信息
         in: body
@@ -1014,7 +1316,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 根据ID获取项目信息
+      description: 根据 ID 获取项目信息
       parameters:
       - description: 项目ID
         in: path
@@ -1049,7 +1351,7 @@ paths:
     patch:
       consumes:
       - application/json
-      description: 更新项目信息（名称、颜色等）
+      description: 更新项目名称、颜色和排序等信息
       parameters:
       - description: 项目ID
         in: path
@@ -1082,6 +1384,59 @@ paths:
       summary: 更新项目
       tags:
       - Project
+  /projects/{id}/activities:
+    get:
+      consumes:
+      - application/json
+      description: Returns recent-first paged document activity records backed by
+        task_events. Supports filtering by document id.
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Oldest loaded activity id, used to load older records
+        in: query
+        name: cursor
+        type: integer
+      - description: Page size, max 200
+        in: query
+        name: limit
+        type: integer
+      - description: Document ID filter
+        in: query
+        name: task_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Document activities loaded
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.ProjectActivityResult'
+              type: object
+        "400":
+          description: Invalid request parameters
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "403":
+          description: Permission denied
+          schema:
+            $ref: '#/definitions/response.Resp'
+        "404":
+          description: Project or document not found
+          schema:
+            $ref: '#/definitions/response.Resp'
+      security:
+      - BearerAuth: []
+      summary: List project document activities
+      tags:
+      - Activity
   /projects/{id}/sync:
     get:
       consumes:
@@ -1135,7 +1490,7 @@ paths:
     patch:
       consumes:
       - application/json
-      description: 更新任务详情（标题、内容、状态、优先级等）
+      description: 更新任务的标题、状态、优先级、截止时间和排序等元数据
       parameters:
       - description: 项目ID
         in: path
@@ -1181,7 +1536,7 @@ paths:
     delete:
       consumes:
       - application/json
-      description: 移除任务成员
+      description: 从任务协作成员列表里移除指定用户
       parameters:
       - description: 项目ID
         in: path
@@ -1214,7 +1569,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 邀请用户参与任务
+      description: 邀请一个用户加入任务协作，并授予 editor/viewer 角色
       parameters:
       - description: 项目ID
         in: path
@@ -1244,64 +1599,27 @@ paths:
       summary: 添加任务成员
       tags:
       - Task
-  /projects/{id}/ws:
+  /realtime/metrics:
     get:
       consumes:
       - application/json
-      description: 'Upgrades to a project WebSocket stream for PROJECT_INIT, PROJECT_SYNC,
-        TASK_CREATED, TASK_UPDATED, TASK_DELETED, PRESENCE_SNAPSHOT, TASK_LOCKED,
-        TASK_UNLOCKED, LOCK_ERROR, PING, and PONG messages. Authenticate with Authorization:
-        Bearer <token> or the token query parameter.'
-      parameters:
-      - description: Project ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      - description: Bearer JWT
-        in: header
-        name: Authorization
-        type: string
-      - description: JWT when a WebSocket client cannot send Authorization
-        in: query
-        name: token
-        type: string
-      - description: Last seen task event id
-        in: query
-        name: cursor
-        type: integer
-      - description: Alias of cursor
-        in: query
-        name: last_event_id
-        type: integer
+      description: Returns local-node metrics for project event and document content
+        WebSocket hubs.
       produces:
       - application/json
       responses:
-        "101":
-          description: Switching Protocols; subsequent frames use this message schema
+        "200":
+          description: Realtime metrics loaded
           schema:
-            $ref: '#/definitions/realtime.ProjectServerMessage'
-        "400":
-          description: Invalid request parameters
-          schema:
-            $ref: '#/definitions/response.Resp'
-        "401":
-          description: Missing or invalid token
-          schema:
-            $ref: '#/definitions/response.Resp'
-        "403":
-          description: Permission denied
-          schema:
-            $ref: '#/definitions/response.Resp'
-        "404":
-          description: Project not found
-          schema:
-            $ref: '#/definitions/response.Resp'
-        "503":
-          description: WebSocket hub is not configured
-          schema:
-            $ref: '#/definitions/response.Resp'
-      summary: Project realtime WebSocket
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/handler.RealtimeMetricsResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get realtime link metrics
       tags:
       - Realtime
   /register:
@@ -1358,18 +1676,48 @@ paths:
       summary: 用户注册
       tags:
       - User
+  /search:
+    get:
+      description: Searches current user's spaces and active documents/todos.
+      parameters:
+      - description: Search query
+        in: query
+        name: q
+        required: true
+        type: string
+      - description: Max results per category
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Search result
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.WorkspaceSearchResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Search workspace
+      tags:
+      - Search
   /tasks:
     get:
       consumes:
       - application/json
-      description: 获取指定项目的任务列表
+      description: 获取指定空间下的任务列表
       parameters:
       - description: 项目ID
         in: query
         name: project_id
         required: true
         type: integer
-      - description: 任务状态 (todo/done)
+      - description: 任务状态(todo/done)
         in: query
         name: status
         type: string
@@ -1405,7 +1753,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 在指定项目中创建新任务
+      description: 在指定空间中创建任务或文档
       parameters:
       - description: 任务信息
         in: body
@@ -1442,7 +1790,7 @@ paths:
     delete:
       consumes:
       - application/json
-      description: 删除指定任务
+      description: 把指定任务移入回收站
       parameters:
       - description: 任务ID
         in: path
@@ -1504,67 +1852,11 @@ paths:
       summary: 查询任务详情
       tags:
       - Task
-  /tasks/{id}/content/ws:
-    get:
-      consumes:
-      - application/json
-      description: 'Upgrades to a task content WebSocket stream for CONTENT_INIT,
-        CONTENT_SYNC, CONTENT_UPDATE, CONTENT_ACK, CONTENT_ERROR, PING, and PONG messages.
-        Authenticate with Authorization: Bearer <token> or the token query parameter.
-        Diary documents are rejected; save them with PATCH /api/v1/documents/{id}/content.'
-      parameters:
-      - description: Task ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      - description: Bearer JWT
-        in: header
-        name: Authorization
-        type: string
-      - description: JWT when a WebSocket client cannot send Authorization
-        in: query
-        name: token
-        type: string
-      - description: Last seen task_content_updates id
-        in: query
-        name: last_update_id
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "101":
-          description: Switching Protocols; subsequent frames use this message schema
-          schema:
-            $ref: '#/definitions/realtime.ContentServerMessage'
-        "400":
-          description: Invalid request parameters
-          schema:
-            $ref: '#/definitions/response.Resp'
-        "401":
-          description: Missing or invalid token
-          schema:
-            $ref: '#/definitions/response.Resp'
-        "403":
-          description: Permission denied
-          schema:
-            $ref: '#/definitions/response.Resp'
-        "404":
-          description: Task not found
-          schema:
-            $ref: '#/definitions/response.Resp'
-        "503":
-          description: WebSocket hub is not configured
-          schema:
-            $ref: '#/definitions/response.Resp'
-      summary: Task content collaboration WebSocket
-      tags:
-      - Realtime
   /tasks/me:
     get:
       consumes:
       - application/json
-      description: 获取当前用户参与的所有任务
+      description: 获取当前用户参与的任务，并支持状态和截止时间过滤
       parameters:
       - description: 页码
         in: query
@@ -1591,6 +1883,164 @@ paths:
       summary: 查看我参与的任务
       tags:
       - Task
+  /trash/spaces:
+    get:
+      description: Returns soft-deleted spaces for the current user.
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 获取成功
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/response.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List trashed spaces
+      tags:
+      - Project
+  /trash/spaces/{id}:
+    delete:
+      description: Permanently deletes a space that is already in trash.
+      parameters:
+      - description: Space ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除成功
+          schema:
+            $ref: '#/definitions/response.Resp'
+      security:
+      - BearerAuth: []
+      summary: Permanently delete trashed space
+      tags:
+      - Project
+  /trash/spaces/{id}/restore:
+    post:
+      description: Restores a soft-deleted space.
+      parameters:
+      - description: Space ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 恢复成功
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/models.Project'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Restore space from trash
+      tags:
+      - Project
+  /trash/tasks:
+    get:
+      consumes:
+      - application/json
+      description: Returns the current user's soft-deleted tasks/documents.
+      parameters:
+      - description: Page
+        in: query
+        name: page
+        type: integer
+      - description: Page size
+        in: query
+        name: size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Loaded
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/response.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List trashed tasks/documents
+      tags:
+      - Trash
+  /trash/tasks/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Hard-deletes a task/document that is already in trash.
+      parameters:
+      - description: Task ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Deleted
+          schema:
+            $ref: '#/definitions/response.Resp'
+      security:
+      - BearerAuth: []
+      summary: Permanently delete task/document from trash
+      tags:
+      - Trash
+  /trash/tasks/{id}/restore:
+    post:
+      consumes:
+      - application/json
+      description: Restores a soft-deleted task/document back to its space.
+      parameters:
+      - description: Task ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Restored
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Resp'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.TrashRestoreResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Restore task/document from trash
+      tags:
+      - Trash
   /users/me:
     get:
       consumes:
@@ -1620,7 +2070,7 @@ paths:
     patch:
       consumes:
       - multipart/form-data
-      description: 更新当前用户的个人信息（头像、用户名、密码等）
+      description: 更新当前用户的个人资料、头像和密码
       parameters:
       - description: 邮箱
         in: formData

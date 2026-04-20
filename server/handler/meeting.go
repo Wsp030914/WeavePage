@@ -4,23 +4,26 @@ import (
 	"ToDoList/server/response"
 	"ToDoList/server/service"
 	"ToDoList/server/utils"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-// CreateMeetingReq describes the optional meeting note creation payload.
 type CreateMeetingReq struct {
 	ProjectID *int   `json:"project_id"`
 	Title     string `json:"title"`
 }
 
-// MeetingHandler handles meeting-note semantic endpoints.
+type CreateMeetingActionTodoReq struct {
+	Title string     `json:"title" binding:"required"`
+	DueAt *time.Time `json:"due_at"`
+}
+
 type MeetingHandler struct {
 	svc *service.TaskService
 }
 
-// NewMeetingHandler creates a meeting handler.
 func NewMeetingHandler(svc *service.TaskService) *MeetingHandler {
 	return &MeetingHandler{svc: svc}
 }
@@ -61,4 +64,42 @@ func (h *MeetingHandler) Create(c *gin.Context) {
 	}
 
 	response.Success(c, result)
+}
+
+// CreateActionTodo creates a lightweight todo from a meeting action item.
+// @Summary Create todo from meeting action
+// @Description Creates a lightweight todo in the same space as the meeting note.
+// @Tags Meeting
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Meeting document ID"
+// @Param req body CreateMeetingActionTodoReq true "Action item"
+// @Success 200 {object} response.Resp{data=models.Task} "Created"
+// @Router /meetings/{id}/actions [post]
+func (h *MeetingHandler) CreateActionTodo(c *gin.Context) {
+	lg := utils.CtxLogger(c)
+	start := time.Now()
+	uid := c.GetInt("uid")
+	meetingID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		response.ParamError(c, "invalid meeting id")
+		return
+	}
+
+	var req CreateMeetingActionTodoReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ParamError(c, "invalid request body")
+		return
+	}
+
+	task, err := h.svc.CreateTodoFromMeetingAction(c.Request.Context(), lg, uid, meetingID, service.MeetingActionTodoInput{
+		Title: req.Title,
+		DueAt: req.DueAt,
+	})
+	if err != nil {
+		handleTaskError(c, lg, err, "meeting.action_todo.failed", start)
+		return
+	}
+	response.Success(c, task)
 }

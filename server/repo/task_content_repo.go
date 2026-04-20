@@ -1,5 +1,8 @@
-package repo
+﻿package repo
 
+// 文件说明：这个文件负责某类持久化访问逻辑。
+// 实现方式：把数据库查询、更新与事务细节收口在仓储层。
+// 这样做的好处是业务层不直接依赖 ORM 细节。
 import (
 	"ToDoList/server/models"
 	"context"

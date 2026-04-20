@@ -1,5 +1,9 @@
 package config
 
+// 文件说明：这个文件定义主配置结构并负责加载配置。
+// 实现方式：通过 viper 同时支持配置文件和 TODO_* 环境变量覆盖，再在加载后补默认值和校验关键项。
+// 这样做的好处是本地开发、测试和部署环境可以共享同一份结构化配置入口。
+
 import (
 	"fmt"
 	"os"
@@ -19,6 +23,7 @@ type Config struct {
 	Kafka        KafkaSettings        `mapstructure:"kafka"`
 	DueScheduler DueSchedulerSettings `mapstructure:"due-scheduler"`
 	Email        EmailConfig          `mapstructure:"email"`
+	AI           AIConfig             `mapstructure:"ai"`
 }
 
 type EmailConfig struct {
@@ -47,6 +52,7 @@ type DatabaseConfig struct {
 	Charset         string        `mapstructure:"config"`
 }
 
+// DSN 组装 MySQL 连接串。
 func (d DatabaseConfig) DSN() string {
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?%s",
 		d.Username, d.Password, d.Host, d.Port, d.DBName, d.Charset)
@@ -91,8 +97,20 @@ type DueSchedulerSettings struct {
 	PingURL             string        `mapstructure:"ping-url"`
 }
 
+type AIConfig struct {
+	Provider            string        `mapstructure:"provider"`
+	APIKey              string        `mapstructure:"api-key"`
+	BaseURL             string        `mapstructure:"base-url"`
+	Model               string        `mapstructure:"model"`
+	Timeout             time.Duration `mapstructure:"timeout"`
+	MaxInputChars       int           `mapstructure:"max-input-chars"`
+	MaxCompletionTokens int           `mapstructure:"max-completion-tokens"`
+}
+
 var GlobalConfig *Config
 
+// LoadConfig 读取配置文件和环境变量，并生成最终配置对象。
+// 先绑定环境变量再补默认值，是为了让部署环境能以最小成本覆盖敏感项。
 func LoadConfig() (*Config, error) {
 	v := viper.New()
 	if p := strings.TrimSpace(os.Getenv("TODO_CONFIG_FILE")); p != "" {
@@ -130,6 +148,7 @@ func LoadConfig() (*Config, error) {
 	return &cfg, nil
 }
 
+// bindEnvs 显式绑定支持的 TODO_* 环境变量。
 func bindEnvs(v *viper.Viper) {
 	keys := []string{
 		"server.port", "server.mode",
@@ -142,12 +161,15 @@ func bindEnvs(v *viper.Viper) {
 		"due-scheduler.callback-url", "due-scheduler.callback-token", "due-scheduler.request-timeout", "due-scheduler.ping-url",
 		"email.host", "email.port", "email.username", "email.password", "email.from",
 		"cos.secret-id", "cos.secret-key", "cos.bucket", "cos.region",
+		"ai.provider", "ai.api-key", "ai.base-url", "ai.model", "ai.timeout", "ai.max-input-chars", "ai.max-completion-tokens",
 	}
 	for _, key := range keys {
 		_ = v.BindEnv(key)
 	}
 }
 
+// validateConfig 校验关键配置是否合法。
+// release 模式下额外拦截占位符密码，是为了防止带着开发默认密钥上线。
 func validateConfig(cfg *Config) error {
 	if !cfg.Kafka.Enable {
 		return fmt.Errorf("config error: kafka.enable must be true")
@@ -178,6 +200,7 @@ func validateConfig(cfg *Config) error {
 	return nil
 }
 
+// isPlaceholderValue 判断某个配置值是否仍是明显的占位符。
 func isPlaceholderValue(v string) bool {
 	value := strings.TrimSpace(strings.ToLower(v))
 	switch value {
@@ -188,6 +211,7 @@ func isPlaceholderValue(v string) bool {
 	}
 }
 
+// setDefaults 为缺失配置补齐开发和运行默认值。
 func setDefaults(cfg *Config) {
 	if cfg.Server.Port == 0 {
 		cfg.Server.Port = 8080
@@ -218,5 +242,17 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.DueScheduler.CallbackToken == "" {
 		cfg.DueScheduler.CallbackToken = "dev-scheduler-callback-token"
+	}
+	if cfg.AI.Provider == "" {
+		cfg.AI.Provider = "openai"
+	}
+	if cfg.AI.Timeout <= 0 {
+		cfg.AI.Timeout = 90 * time.Second
+	}
+	if cfg.AI.MaxInputChars <= 0 {
+		cfg.AI.MaxInputChars = 24000
+	}
+	if cfg.AI.MaxCompletionTokens <= 0 {
+		cfg.AI.MaxCompletionTokens = 1600
 	}
 }

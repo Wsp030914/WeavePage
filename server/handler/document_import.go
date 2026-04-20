@@ -1,5 +1,8 @@
-package handler
+﻿package handler
 
+// 文件说明：这个文件负责某类 HTTP 接口的参数绑定、上下文提取与错误映射。
+// 实现方式：接口层尽量保持薄，只做协议转换并调用服务层。
+// 这样做的好处是业务规则集中在 service 层，接口层更容易维护。
 import (
 	"ToDoList/server/response"
 	"ToDoList/server/service"

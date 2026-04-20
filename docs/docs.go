@@ -17,7 +17,7 @@ const docTemplate = `{
     "paths": {
         "/api/internal/scheduler/task-due": {
             "post": {
-                "description": "内部调度器回调接口，用于触发任务到期通知",
+                "description": "调度器内部回调接口，用于触发任务到期通知",
                 "consumes": [
                     "application/json"
                 ],
@@ -55,6 +55,123 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "令牌无效",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            }
+        },
+        "/comments/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes a comment. The author and document owners/editors can delete comments.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Comment"
+                ],
+                "summary": "Delete a comment",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Comment ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deleted",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "404": {
+                        "description": "Comment not found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Updates comment state such as resolved/unresolved. Authors and document owners/editors can resolve comments.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Comment"
+                ],
+                "summary": "Update a comment state",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Comment ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Comment patch",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.UpdateTaskCommentReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/models.TaskCommentInfo"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "404": {
+                        "description": "Comment not found",
                         "schema": {
                             "$ref": "#/definitions/response.Resp"
                         }
@@ -109,6 +226,55 @@ const docTemplate = `{
                         "description": "系统错误",
                         "schema": {
                             "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            }
+        },
+        "/diary/{date}": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "查找或创建当前用户指定日期 YYYY-MM-DD.md 私人文档。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Diary"
+                ],
+                "summary": "打开或创建指定日期日记",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "YYYY-MM-DD",
+                        "name": "date",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "打开成功",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.DiaryTodayResult"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
                 }
@@ -476,6 +642,138 @@ const docTemplate = `{
                 }
             }
         },
+        "/documents/{id}/comments": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns document-level comments for a document, meeting note, or todo. Diary documents are rejected.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Comment"
+                ],
+                "summary": "List document comments",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Document ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Comments",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/models.TaskCommentInfo"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Creates a document-level comment for a document, meeting note, or todo. Diary documents are rejected.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Comment"
+                ],
+                "summary": "Create a document comment",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Document ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Comment payload",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.CreateTaskCommentReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/models.TaskCommentInfo"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            }
+        },
         "/documents/{id}/content": {
             "patch": {
                 "security": [
@@ -554,7 +852,7 @@ const docTemplate = `{
         },
         "/login": {
             "post": {
-                "description": "使用用户名和密码登录",
+                "description": "使用用户名或邮箱和密码登录",
                 "consumes": [
                     "application/json"
                 ],
@@ -707,6 +1005,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/meetings/{id}/actions": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Creates a lightweight todo in the same space as the meeting note.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Meeting"
+                ],
+                "summary": "Create todo from meeting action",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Meeting document ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Action item",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.CreateMeetingActionTodoReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/models.Task"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/projects": {
             "get": {
                 "security": [
@@ -714,7 +1070,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "获取项目列表，支持按名称搜索",
+                "description": "获取项目列表，并支持按名称搜索",
                 "consumes": [
                     "application/json"
                 ],
@@ -772,7 +1128,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "创建新的项目",
+                "description": "创建新的项目空间",
                 "consumes": [
                     "application/json"
                 ],
@@ -835,7 +1191,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "根据ID获取项目信息",
+                "description": "根据 ID 获取项目信息",
                 "consumes": [
                     "application/json"
                 ],
@@ -941,7 +1297,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "更新项目信息（名称、颜色等）",
+                "description": "更新项目名称、颜色和排序等信息",
                 "consumes": [
                     "application/json"
                 ],
@@ -985,6 +1341,91 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "项目不存在",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{id}/activities": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns recent-first paged document activity records backed by task_events. Supports filtering by document id.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Activity"
+                ],
+                "summary": "List project document activities",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Project ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Oldest loaded activity id, used to load older records",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size, max 200",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Document ID filter",
+                        "name": "task_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Document activities loaded",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.ProjectActivityResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request parameters",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "403": {
+                        "description": "Permission denied",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    },
+                    "404": {
+                        "description": "Project or document not found",
                         "schema": {
                             "$ref": "#/definitions/response.Resp"
                         }
@@ -1078,7 +1519,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "更新任务详情（标题、内容、状态、优先级等）",
+                "description": "更新任务的标题、状态、优先级、截止时间和排序等元数据",
                 "consumes": [
                     "application/json"
                 ],
@@ -1149,7 +1590,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "邀请用户参与任务",
+                "description": "邀请一个用户加入任务协作，并授予 editor/viewer 角色",
                 "consumes": [
                     "application/json"
                 ],
@@ -1200,7 +1641,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "移除任务成员",
+                "description": "从任务协作成员列表里移除指定用户",
                 "consumes": [
                     "application/json"
                 ],
@@ -1246,9 +1687,14 @@ const docTemplate = `{
                 }
             }
         },
-        "/projects/{id}/ws": {
+        "/realtime/metrics": {
             "get": {
-                "description": "Upgrades to a project WebSocket stream for PROJECT_INIT, PROJECT_SYNC, TASK_CREATED, TASK_UPDATED, TASK_DELETED, PRESENCE_SNAPSHOT, TASK_LOCKED, TASK_UNLOCKED, LOCK_ERROR, PING, and PONG messages. Authenticate with Authorization: Bearer \u003ctoken\u003e or the token query parameter.",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns local-node metrics for project event and document content WebSocket hubs.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1258,75 +1704,24 @@ const docTemplate = `{
                 "tags": [
                     "Realtime"
                 ],
-                "summary": "Project realtime WebSocket",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Project ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Bearer JWT",
-                        "name": "Authorization",
-                        "in": "header"
-                    },
-                    {
-                        "type": "string",
-                        "description": "JWT when a WebSocket client cannot send Authorization",
-                        "name": "token",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Last seen task event id",
-                        "name": "cursor",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Alias of cursor",
-                        "name": "last_event_id",
-                        "in": "query"
-                    }
-                ],
+                "summary": "Get realtime link metrics",
                 "responses": {
-                    "101": {
-                        "description": "Switching Protocols; subsequent frames use this message schema",
+                    "200": {
+                        "description": "Realtime metrics loaded",
                         "schema": {
-                            "$ref": "#/definitions/realtime.ProjectServerMessage"
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid request parameters",
-                        "schema": {
-                            "$ref": "#/definitions/response.Resp"
-                        }
-                    },
-                    "401": {
-                        "description": "Missing or invalid token",
-                        "schema": {
-                            "$ref": "#/definitions/response.Resp"
-                        }
-                    },
-                    "403": {
-                        "description": "Permission denied",
-                        "schema": {
-                            "$ref": "#/definitions/response.Resp"
-                        }
-                    },
-                    "404": {
-                        "description": "Project not found",
-                        "schema": {
-                            "$ref": "#/definitions/response.Resp"
-                        }
-                    },
-                    "503": {
-                        "description": "WebSocket hub is not configured",
-                        "schema": {
-                            "$ref": "#/definitions/response.Resp"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handler.RealtimeMetricsResponse"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
                 }
@@ -1416,6 +1811,58 @@ const docTemplate = `{
                 }
             }
         },
+        "/search": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Searches current user's spaces and active documents/todos.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Search"
+                ],
+                "summary": "Search workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search query",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results per category",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Search result",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.WorkspaceSearchResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/tasks": {
             "get": {
                 "security": [
@@ -1423,7 +1870,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "获取指定项目的任务列表",
+                "description": "获取指定空间下的任务列表",
                 "consumes": [
                     "application/json"
                 ],
@@ -1444,7 +1891,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "任务状态 (todo/done)",
+                        "description": "任务状态(todo/done)",
                         "name": "status",
                         "in": "query"
                     },
@@ -1494,7 +1941,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "在指定项目中创建新任务",
+                "description": "在指定空间中创建任务或文档",
                 "consumes": [
                     "application/json"
                 ],
@@ -1557,7 +2004,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "获取当前用户参与的所有任务",
+                "description": "获取当前用户参与的任务，并支持状态和截止时间过滤",
                 "consumes": [
                     "application/json"
                 ],
@@ -1670,7 +2117,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "删除指定任务",
+                "description": "把指定任务移入回收站",
                 "consumes": [
                     "application/json"
                 ],
@@ -1712,9 +2159,145 @@ const docTemplate = `{
                 }
             }
         },
-        "/tasks/{id}/content/ws": {
+        "/trash/spaces": {
             "get": {
-                "description": "Upgrades to a task content WebSocket stream for CONTENT_INIT, CONTENT_SYNC, CONTENT_UPDATE, CONTENT_ACK, CONTENT_ERROR, PING, and PONG messages. Authenticate with Authorization: Bearer \u003ctoken\u003e or the token query parameter. Diary documents are rejected; save them with PATCH /api/v1/documents/{id}/content.",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns soft-deleted spaces for the current user.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Project"
+                ],
+                "summary": "List trashed spaces",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "获取成功",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/response.PageResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/trash/spaces/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Permanently deletes a space that is already in trash.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Project"
+                ],
+                "summary": "Permanently delete trashed space",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Space ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "删除成功",
+                        "schema": {
+                            "$ref": "#/definitions/response.Resp"
+                        }
+                    }
+                }
+            }
+        },
+        "/trash/spaces/{id}/restore": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Restores a soft-deleted space.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Project"
+                ],
+                "summary": "Restore space from trash",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Space ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "恢复成功",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/models.Project"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/trash/tasks": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the current user's soft-deleted tasks/documents.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1722,9 +2305,63 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "Realtime"
+                    "Trash"
                 ],
-                "summary": "Task content collaboration WebSocket",
+                "summary": "List trashed tasks/documents",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Page",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size",
+                        "name": "size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Loaded",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/response.PageResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/trash/tasks/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Hard-deletes a task/document that is already in trash.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Trash"
+                ],
+                "summary": "Permanently delete task/document from trash",
                 "parameters": [
                     {
                         "type": "integer",
@@ -1732,61 +2369,62 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Bearer JWT",
-                        "name": "Authorization",
-                        "in": "header"
-                    },
-                    {
-                        "type": "string",
-                        "description": "JWT when a WebSocket client cannot send Authorization",
-                        "name": "token",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Last seen task_content_updates id",
-                        "name": "last_update_id",
-                        "in": "query"
                     }
                 ],
                 "responses": {
-                    "101": {
-                        "description": "Switching Protocols; subsequent frames use this message schema",
-                        "schema": {
-                            "$ref": "#/definitions/realtime.ContentServerMessage"
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid request parameters",
+                    "200": {
+                        "description": "Deleted",
                         "schema": {
                             "$ref": "#/definitions/response.Resp"
                         }
-                    },
-                    "401": {
-                        "description": "Missing or invalid token",
+                    }
+                }
+            }
+        },
+        "/trash/tasks/{id}/restore": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Restores a soft-deleted task/document back to its space.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Trash"
+                ],
+                "summary": "Restore task/document from trash",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Task ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Restored",
                         "schema": {
-                            "$ref": "#/definitions/response.Resp"
-                        }
-                    },
-                    "403": {
-                        "description": "Permission denied",
-                        "schema": {
-                            "$ref": "#/definitions/response.Resp"
-                        }
-                    },
-                    "404": {
-                        "description": "Task not found",
-                        "schema": {
-                            "$ref": "#/definitions/response.Resp"
-                        }
-                    },
-                    "503": {
-                        "description": "WebSocket hub is not configured",
-                        "schema": {
-                            "$ref": "#/definitions/response.Resp"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Resp"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.TrashRestoreResult"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
                 }
@@ -1843,7 +2481,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "更新当前用户的个人信息（头像、用户名、密码等）",
+                "description": "更新当前用户的个人资料、头像和密码",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -1983,6 +2621,20 @@ const docTemplate = `{
                 }
             }
         },
+        "handler.CreateMeetingActionTodoReq": {
+            "type": "object",
+            "required": [
+                "title"
+            ],
+            "properties": {
+                "due_at": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
         "handler.CreateMeetingReq": {
             "type": "object",
             "properties": {
@@ -2007,6 +2659,23 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 128,
                     "minLength": 1
+                }
+            }
+        },
+        "handler.CreateTaskCommentReq": {
+            "type": "object",
+            "required": [
+                "content_md"
+            ],
+            "properties": {
+                "anchor_text": {
+                    "type": "string"
+                },
+                "anchor_type": {
+                    "type": "string"
+                },
+                "content_md": {
+                    "type": "string"
                 }
             }
         },
@@ -2079,6 +2748,20 @@ const docTemplate = `{
                 }
             }
         },
+        "handler.RealtimeMetricsResponse": {
+            "type": "object",
+            "properties": {
+                "collected_at": {
+                    "type": "string"
+                },
+                "content": {
+                    "$ref": "#/definitions/realtime.HubMetrics"
+                },
+                "project": {
+                    "$ref": "#/definitions/realtime.HubMetrics"
+                }
+            }
+        },
         "handler.RemoveMemberReq": {
             "type": "object",
             "required": [
@@ -2116,6 +2799,14 @@ const docTemplate = `{
                 },
                 "sort_order": {
                     "type": "integer"
+                }
+            }
+        },
+        "handler.UpdateTaskCommentReq": {
+            "type": "object",
+            "properties": {
+                "resolved": {
+                    "type": "boolean"
                 }
             }
         },
@@ -2160,6 +2851,16 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "deleted_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "deleted_by": {
+                    "type": "integer"
+                },
+                "deleted_name": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "integer"
                 },
@@ -2187,6 +2888,16 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "created_at": {
+                    "type": "string"
+                },
+                "deleted_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "deleted_by": {
+                    "type": "integer"
+                },
+                "deleted_title": {
                     "type": "string"
                 },
                 "doc_type": {
@@ -2229,6 +2940,50 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.TaskCommentInfo": {
+            "type": "object",
+            "properties": {
+                "anchor_text": {
+                    "type": "string"
+                },
+                "anchor_type": {
+                    "type": "string"
+                },
+                "content_md": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "project_id": {
+                    "type": "integer"
+                },
+                "resolved": {
+                    "type": "boolean"
+                },
+                "resolved_at": {
+                    "type": "string"
+                },
+                "resolved_by": {
+                    "type": "integer"
+                },
+                "task_id": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/models.UserInfo"
+                },
+                "user_id": {
                     "type": "integer"
                 }
             }
@@ -2319,151 +3074,84 @@ const docTemplate = `{
                 }
             }
         },
-        "realtime.ContentServerMessage": {
+        "realtime.HubMetrics": {
             "type": "object",
             "properties": {
-                "actor_id": {
+                "active_connections": {
                     "type": "integer"
                 },
-                "duplicate": {
-                    "type": "boolean"
-                },
-                "error": {
-                    "type": "string"
-                },
-                "has_more": {
-                    "type": "boolean"
-                },
-                "message_id": {
-                    "type": "string"
-                },
-                "next_cursor": {
+                "active_rooms": {
                     "type": "integer"
                 },
-                "server_node_id": {
-                    "type": "string"
-                },
-                "task_id": {
+                "active_users": {
                     "type": "integer"
                 },
-                "type": {
+                "counters": {
+                    "$ref": "#/definitions/realtime.RealtimeCounters"
+                },
+                "hub": {
                     "type": "string"
                 },
-                "update": {
+                "node_id": {
+                    "type": "string"
+                },
+                "rooms": {
                     "type": "array",
                     "items": {
-                        "type": "integer"
-                    }
-                },
-                "update_id": {
-                    "type": "integer"
-                },
-                "updates": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/realtime.ContentUpdateItem"
+                        "$ref": "#/definitions/realtime.RoomMetrics"
                     }
                 }
             }
         },
-        "realtime.ContentUpdateItem": {
+        "realtime.RealtimeCounters": {
             "type": "object",
             "properties": {
-                "actor_id": {
+                "broadcast_messages": {
                     "type": "integer"
                 },
-                "id": {
+                "connections_accepted": {
                     "type": "integer"
                 },
-                "message_id": {
-                    "type": "string"
-                },
-                "task_id": {
+                "connections_closed": {
                     "type": "integer"
                 },
-                "update": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                "content_updates": {
+                    "type": "integer"
+                },
+                "dropped_clients": {
+                    "type": "integer"
+                },
+                "duplicate_updates": {
+                    "type": "integer"
+                },
+                "lock_errors": {
+                    "type": "integer"
+                },
+                "lock_requests": {
+                    "type": "integer"
+                },
+                "pubsub_publish_errors": {
+                    "type": "integer"
+                },
+                "pubsub_published": {
+                    "type": "integer"
+                },
+                "pubsub_received": {
+                    "type": "integer"
                 }
             }
         },
-        "realtime.ProjectLock": {
-            "type": "object",
-            "properties": {
-                "field": {
-                    "type": "string"
-                },
-                "holder_user_id": {
-                    "type": "integer"
-                },
-                "holder_username": {
-                    "type": "string"
-                },
-                "task_id": {
-                    "type": "integer"
-                }
-            }
-        },
-        "realtime.ProjectPresence": {
+        "realtime.RoomMetrics": {
             "type": "object",
             "properties": {
                 "connections": {
                     "type": "integer"
                 },
-                "user_id": {
+                "id": {
                     "type": "integer"
                 },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
-        "realtime.ProjectServerMessage": {
-            "type": "object",
-            "properties": {
-                "cursor": {
+                "users": {
                     "type": "integer"
-                },
-                "error": {
-                    "type": "string"
-                },
-                "event": {
-                    "$ref": "#/definitions/models.TaskEvent"
-                },
-                "event_id": {
-                    "type": "string"
-                },
-                "events": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.TaskEvent"
-                    }
-                },
-                "has_more": {
-                    "type": "boolean"
-                },
-                "lock": {
-                    "$ref": "#/definitions/realtime.ProjectLock"
-                },
-                "next_cursor": {
-                    "type": "integer"
-                },
-                "presence": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/realtime.ProjectPresence"
-                    }
-                },
-                "project_id": {
-                    "type": "integer"
-                },
-                "server_node_id": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string"
                 }
             }
         },
@@ -2619,6 +3307,23 @@ const docTemplate = `{
                 }
             }
         },
+        "service.ProjectActivityResult": {
+            "type": "object",
+            "properties": {
+                "activities": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.TaskActivityEntry"
+                    }
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "next_cursor": {
+                    "type": "integer"
+                }
+            }
+        },
         "service.ProjectSyncResult": {
             "type": "object",
             "properties": {
@@ -2636,6 +3341,44 @@ const docTemplate = `{
                 }
             }
         },
+        "service.TaskActivityEntry": {
+            "type": "object",
+            "properties": {
+                "activity_type": {
+                    "type": "string"
+                },
+                "actor_id": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "event_id": {
+                    "type": "string"
+                },
+                "event_type": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "project_id": {
+                    "type": "integer"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "task": {
+                    "$ref": "#/definitions/models.Task"
+                },
+                "task_id": {
+                    "type": "integer"
+                },
+                "task_version": {
+                    "type": "integer"
+                }
+            }
+        },
         "service.TaskListResult": {
             "type": "object",
             "properties": {
@@ -2648,6 +3391,31 @@ const docTemplate = `{
                 "total": {
                     "type": "integer",
                     "format": "int64"
+                }
+            }
+        },
+        "service.TrashRestoreResult": {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "$ref": "#/definitions/models.Task"
+                }
+            }
+        },
+        "service.WorkspaceSearchResult": {
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Task"
+                    }
+                },
+                "spaces": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Project"
+                    }
                 }
             }
         }

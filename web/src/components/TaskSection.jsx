@@ -32,6 +32,11 @@ export default function TaskSection({
     restoreLabel = 'Restore',
     projectLabel = 'Space',
     detailsLabel = 'Open',
+    completeAriaLabel = 'Mark as done',
+    restoreAriaLabel = 'Mark as todo',
+    expiredLabel = 'Expired',
+    dueLabel = 'Due',
+    deleteLabel = 'Trash',
 }) {
     return (
         <section className="yq-task-section">
@@ -59,7 +64,7 @@ export default function TaskSection({
                                 <button
                                     type="button"
                                     className="yq-task-toggle"
-                                    aria-label={task.status === 'done' ? 'Mark as todo' : 'Mark as done'}
+                                    aria-label={task.status === 'done' ? restoreAriaLabel : completeAriaLabel}
                                     onClick={() => onToggleStatus(task)}
                                     disabled={lockedByOther}
                                     title={lockedByOther ? lockTitle : undefined}
@@ -70,7 +75,7 @@ export default function TaskSection({
                                 <div className="yq-task-main" onClick={() => onOpenDetails(task)}>
                                     <div className="yq-task-title">{task.title}</div>
                                     <div className="yq-task-meta">
-                                        {isTaskExpired(task) && <span className="yq-tag yq-tag-expired">Expired</span>}
+                                        {isTaskExpired(task) && <span className="yq-tag yq-tag-expired">{expiredLabel}</span>}
                                         {task.priority > 0 && <span className="yq-tag">P{task.priority}</span>}
                                         {metadataLock && (
                                             <span className={`yq-tag yq-tag-lock ${lockedBySelf ? 'self' : 'other'}`} title={lockTitle}>
@@ -78,7 +83,7 @@ export default function TaskSection({
                                             </span>
                                         )}
                                         {task.project_id > 0 && <span>Space #{task.project_id}</span>}
-                                        {formatDueDate(task.due_at) && <span>Due {formatDueDate(task.due_at)}</span>}
+                                        {formatDueDate(task.due_at) && <span>{dueLabel} {formatDueDate(task.due_at)}</span>}
                                     </div>
                                 </div>
 
@@ -97,7 +102,7 @@ export default function TaskSection({
                                         disabled={lockedByOther}
                                         title={lockedByOther ? lockTitle : undefined}
                                     >
-                                        Delete
+                                        {deleteLabel}
                                     </Button>
                                 </div>
                             </article>
